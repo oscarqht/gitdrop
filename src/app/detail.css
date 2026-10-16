@@ -1,0 +1,238 @@
+.detail {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 440px;
+  max-width: 100%;
+  background: #fff;
+  z-index: 20;
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 60px #29351a15;
+  display: flex;
+  flex-direction: column;
+}
+.detail-heading {
+  height: 65px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 12px;
+}
+.detail-body {
+  padding: 24px;
+  overflow: auto;
+  flex: 1;
+}
+.detail label,
+.modal label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7a856d;
+  margin: 18px 0 7px;
+}
+.detail input:not([type='radio']),
+.detail textarea,
+.detail select,
+.modal input {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fdfefb;
+  color: #4c5743;
+  margin-top: 7px;
+  font-weight: 400;
+  font-size: 12px;
+}
+.detail textarea {
+  resize: vertical;
+  line-height: 1.7;
+}
+.note-input {
+  min-height: 170px;
+}
+.detail-footer {
+  border-top: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+}
+.cover-editor .cover {
+  border-radius: 7px;
+  height: 160px;
+}
+.cover-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.cover-actions button,
+.cover-actions .button {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--border);
+  padding: 7px 9px;
+  border-radius: 5px;
+}
+.cover-actions label.button {
+  margin: 0;
+  font-size: 10px;
+  cursor: pointer;
+}
+.emoji-popover {
+  margin-top: 12px;
+}
+.note-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.note-heading label {
+  margin: 10px 0;
+}
+.note-heading button,
+.variant-order button {
+  font-size: 10px;
+  color: #6a8557;
+}
+.variant {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+.variant label {
+  margin-top: 8px;
+}
+.variant input[type='radio'] {
+  accent-color: var(--green);
+}
+.variant-order {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.input-with-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.input-with-action input {
+  min-width: 0;
+}
+.danger {
+  color: #b57965 !important;
+}
+.muted {
+  color: #a1a997;
+  font-weight: 400;
+}
+.markdown {
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.markdown a {
+  text-decoration: underline;
+  color: #61864a;
+}
+.markdown pre {
+  overflow: auto;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #28352055;
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal {
+  background: white;
+  width: 440px;
+  max-width: 100%;
+  border-radius: 16px;
+  padding: 35px;
+  position: relative;
+  box-shadow: 0 25px 90px #18241230;
+}
+.modal h2,
+.modal > p {
+  text-align: center;
+}
+.modal > p {
+  color: #909b84;
+  font-size: 12px;
+}
+.modal-close {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  color: #939d87;
+}
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 23px;
+  font-size: 10px;
+  color: #939b89;
+}
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 17px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.record-row span {
+  flex: 1;
+}
+.record-row button {
+  font-size: 11px;
+}
+.recovery-entry {
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.recovery-entry pre {
+  overflow: auto;
+  max-height: 300px;
+  font-size: 10px;
+}
+.welcome {
+  text-align: center;
+  padding: 15vh 20px;
+}
+.welcome .brand-mark {
+  margin: 0 auto;
+  width: 60px;
+  height: 60px;
+}
+.welcome p {
+  color: #939b89;
+}
+.welcome .primary {
+  margin-top: 20px;
+}
+.mobile-only {
+  display: none;
+}

@@ -1,2 +1,9 @@
 .worktrees
 .raft
+
+node_modules/
+.next/
+coverage/
+.env*
+*.tsbuildinfo
+.DS_Store
