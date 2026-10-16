@@ -55,11 +55,45 @@ describe('bounded pinned public fetch', () => {
     await expect(safeFetch('https://example.com')).rejects.toThrow('Private-network');
     expect(mocks.request).toHaveBeenCalledTimes(1);
   });
-  it('follows relative redirects but bounds the chain', async () => {
+  it('follows relative redirects', async () => {
     replies({ status: 302, headers: { location: '/next' } }, { body: 'arrived' });
     expect((await safeFetch('http://example.com')).url).toBe('http://example.com/next');
-    replies(...Array.from({ length: 6 }, () => ({ status: 302, headers: { location: '/loop' } })));
+  });
+  it('fetches metadata through a long redirect chain such as google.com/ai', async () => {
+    const targets = [
+      'https://www.google.com/ai',
+      '/aimode',
+      '/search?udm=50&aep=11',
+      '/search?aep=11',
+      '/webhp?aep=11',
+      '/sorry/index?continue=webhp',
+      '/webhp?aep=11&google_abuse=exemption',
+    ];
+    replies(
+      ...targets.map((location) => ({ status: 302, headers: { location } })),
+      { body: '<title>Google</title>' },
+    );
+    const { fetchMetadata } = await import('../src/server/metadata');
+    expect((await fetchMetadata('https://google.com/ai')).title).toBe('Google');
+    expect(mocks.request).toHaveBeenCalledTimes(8);
+    expect(mocks.lookup).toHaveBeenCalledTimes(8);
+    expect(mocks.request.mock.calls[7][0].href).toBe(new URL(targets[6], targets[0]).href);
+  });
+  it('bounds redirect loops', async () => {
+    replies(...Array.from({ length: 12 }, () => ({ status: 302, headers: { location: '/loop' } })));
     await expect(safeFetch('https://example.com')).rejects.toThrow('Too many');
+    expect(mocks.request).toHaveBeenCalledTimes(11);
+  });
+  it('rejects private targets even after a long public redirect chain', async () => {
+    replies(
+      ...Array.from({ length: 6 }, (_, index) => ({
+        status: 302,
+        headers: { location: `/step-${index}` },
+      })),
+      { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } },
+    );
+    await expect(safeFetch('https://example.com')).rejects.toThrow('Private-network');
+    expect(mocks.request).toHaveBeenCalledTimes(7);
   });
   it('rejects error statuses and declared or streamed oversized content', async () => {
     replies({ status: 404 });

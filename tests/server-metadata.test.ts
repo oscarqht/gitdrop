@@ -46,7 +46,7 @@ describe('public URL boundary', () => {
       { address: '127.0.0.1', family: 4 },
     ] as never);
     await expect(safeFetch('https://example.com')).rejects.toThrow('Private-network');
-    await expect(safeFetch('https://example.com', 10, 5)).rejects.toThrow('redirects');
+    await expect(safeFetch('https://example.com', 10, 11)).rejects.toThrow('redirects');
   });
   it('optimizes covers within size and dimension constraints', async () => {
     const input = await sharp({

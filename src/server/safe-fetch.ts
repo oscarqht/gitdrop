@@ -4,6 +4,9 @@ import https from 'node:https';
 import ipaddr from 'ipaddr.js';
 import { HttpError } from './auth';
 
+// Public bookmark URLs can legitimately take several canonicalization and regional hops.
+const MAX_REDIRECTS = 10;
+
 export function isPublicAddress(address: string): boolean {
   try {
     let parsed = ipaddr.parse(address);
@@ -43,7 +46,7 @@ export async function safeFetch(
   maxBytes = 2_000_000,
   redirects = 0,
 ): Promise<{ body: Buffer; type: string; url: string }> {
-  if (redirects > 4) throw new HttpError(400, 'Too many redirects.');
+  if (redirects > MAX_REDIRECTS) throw new HttpError(400, 'Too many redirects.');
   const url = validatePublicUrl(input);
   const host = url.hostname.replace(/^\[|\]$/g, '');
   let dnsTimer: ReturnType<typeof setTimeout> | undefined;
