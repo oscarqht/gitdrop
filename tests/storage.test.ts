@@ -365,3 +365,91 @@ it('rejects absent control files and malformed manifest shapes', () => {
   );
   expect(decodeFiles(valid).diagnostics.join()).toContain('Invalid source manifest');
 });
+
+it('moves a bookmark into a collection across sync and heals stale pre-move duplicate files on remote', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gitdrop-move-sync-'));
+  try {
+    const remote = path.join(root, 'remote.git');
+    await fs.mkdir(remote);
+    git(remote, 'init', '--bare', '--initial-branch=main');
+
+    const a = path.join(root, 'a');
+    const storeA = new LocalStore(a);
+    await storeA.initialize();
+    await storeA.sync();
+    git(a, 'remote', 'add', 'origin', remote);
+
+    const item = makeItem('bookmark', {
+      title: 'Google',
+      url: 'https://google.com',
+      parentId: 'inbox',
+    });
+    const folder = makeItem('collection', { title: 'Folder' });
+    await storeA.mutate({ id: 'create-item', actor: 'a', type: 'create', record: item });
+    await storeA.mutate({ id: 'create-folder', actor: 'a', type: 'create', record: folder });
+    await storeA.sync();
+
+    // Clone to B, move item on A while B makes an concurrent change, then merge
+    const b = path.join(root, 'b');
+    git(root, 'clone', remote, b);
+    const storeB = new LocalStore(b);
+
+    await storeA.mutate({
+      id: 'move-item',
+      actor: 'a',
+      type: 'update',
+      recordId: item.id,
+      patch: { parentId: folder.id },
+    });
+    const extra = makeItem('bookmark', {
+      title: 'Other',
+      url: 'https://example.org',
+      parentId: 'inbox',
+    });
+    await storeB.mutate({ id: 'create-extra', actor: 'b', type: 'create', record: extra });
+
+    await storeB.sync();
+    await storeA.sync();
+
+    const headAfterSync = git(a, 'rev-parse', 'HEAD');
+    // Subsequent syncs should be idempotent and not create oscillation commits
+    await storeA.sync();
+    expect(git(a, 'rev-parse', 'HEAD')).toBe(headAfterSync);
+
+    const exportedA = await storeA.exportFiles();
+    const itemFiles = Object.keys(exportedA).filter((p) => p.endsWith(`--${item.id.slice(0, 8)}.json`));
+    expect(itemFiles).toHaveLength(1);
+    expect(itemFiles[0]).toContain('Folder--');
+
+    // Simulate a remote that already contains a stale pre-move duplicate file alongside the moved file
+    const staleRecord = { ...item, parentId: 'inbox' };
+    const stalePath = `Inbox--inbox/google.com--${item.id.slice(0, 8)}.json`;
+    await fs.writeFile(path.join(a, stalePath), `${JSON.stringify(staleRecord, null, 2)}\n`);
+    git(a, 'add', stalePath);
+    git(
+      a,
+      '-c',
+      'user.name=Gitdrop',
+      '-c',
+      'user.email=gitdrop@localhost',
+      'commit',
+      '-m',
+      'Inject stale duplicate record on remote',
+    );
+    git(a, 'push', 'origin', 'HEAD:refs/heads/main');
+
+    // A fresh local store connecting to this remote should heal the stale duplicate and sync cleanly
+    const c = path.join(root, 'c');
+    const storeC = new LocalStore(c);
+    await storeC.initialize();
+    await storeC.sync();
+    git(c, 'remote', 'add', 'origin', remote);
+    const synced = await storeC.sync();
+    expect(synced.diagnostics).toEqual([]);
+    expect(synced.library.records[item.id]?.parentId).toBe(folder.id);
+    await expect(fs.stat(path.join(c, stalePath))).rejects.toThrow();
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 30000);
+
