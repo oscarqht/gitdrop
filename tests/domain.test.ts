@@ -226,3 +226,89 @@ describe('automatic metadata provenance',()=>{
     expect(merged.records.bookmark.description).toBe('Manual');expect(merged).toEqual(mergeLibraries(base,manual,automatic));
   });
 });
+
+describe('raindrop csv import and batch create', () => {
+  it('parses Raindrop CSV rows with quoted fields, tags, notes, excerpts, and applies batch create into target collection', async () => {
+    const { parseRaindropCsv } = await import('../src/domain/csv');
+    const csv = [
+      'id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite',
+      '1039405875,"The ""Wait, Not Like That"" Free Speech Panic",A note,"In February, 2021, an article",https://www.techdirt.com/2025/04/17/free-speech/,Unsorted,"politics, media, politics",2025-04-17T23:54:51.630Z,https://img.example.com/1.png,,false',
+      '1075498448,AI Is Polytheistic,,"Emergent ""Gods""\nMultiline excerpt",https://www.noemamag.com/ai-is-polytheistic/,Unsorted,ai,2025-05-06T03:06:16.597Z,,Some highlight,true',
+    ].join('\r\n');
+
+    const col = makeItem('collection', { id: 'col-reading', title: 'Reading' });
+    const existing = makeItem('bookmark', {
+      id: 'bm-existing',
+      title: 'Existing',
+      url: 'https://existing.example.com',
+      parentId: col.id,
+      order: 'a5',
+    });
+    let library = create(createLibrary(), col);
+    library = create(library, existing);
+
+    const items = parseRaindropCsv(csv, {
+      parentId: col.id,
+      beforeOrder: existing.order,
+      actor: 'importer',
+    });
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      kind: 'bookmark',
+      title: 'The "Wait, Not Like That" Free Speech Panic',
+      note: 'A note',
+      description: 'In February, 2021, an article',
+      parentId: 'col-reading',
+      tags: ['politics', 'media'],
+      createdAt: '2025-04-17T23:54:51.630Z',
+    });
+    expect(items[0].variants?.[0].url).toBe('https://www.techdirt.com/2025/04/17/free-speech/');
+    expect(items[1]).toMatchObject({
+      kind: 'bookmark',
+      title: 'AI Is Polytheistic',
+      note: 'Some highlight',
+      description: 'Emergent "Gods"\nMultiline excerpt',
+      parentId: 'col-reading',
+      tags: ['ai'],
+      createdAt: '2025-05-06T03:06:16.597Z',
+    });
+    expect(items[0].order < items[1].order).toBe(true);
+    expect(items[1].order < existing.order).toBe(true);
+
+    const updated = applyOperation(library, {
+      id: 'batch-import-op',
+      actor: 'importer',
+      type: 'create',
+      records: items,
+    });
+    expect(Object.keys(updated.records)).toHaveLength(4);
+    expect(updated.records[items[0].id].parentId).toBe('col-reading');
+    expect(updated.records[items[1].id].parentId).toBe('col-reading');
+  });
+
+  it('handles UTF-8 BOM, combined note+highlights, fallback hostname titles, and rejects invalid CSVs', async () => {
+    const { parseRaindropCsv } = await import('../src/domain/csv');
+    const csvWithBom =
+      '\uFEFFid,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite\n' +
+      '1,,User note,Short excerpt,example.com/article,OtherFolder,"tag1, tag2",invalid-date,,Highlighted text,false\n' +
+      '2,Ignored Javascript,,,javascript:alert(1),OtherFolder,,,,,\n';
+
+    const items = parseRaindropCsv(csvWithBom, { parentId: 'col-target' });
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe('example.com');
+    expect(items[0].note).toBe('User note\n\nHighlighted text');
+    expect(items[0].description).toBe('Short excerpt');
+    expect(items[0].tags).toEqual(['tag1', 'tag2']);
+    expect(items[0].parentId).toBe('col-target');
+    expect(items[0].variants?.[0].url).toBe('https://example.com/article');
+
+    expect(() => parseRaindropCsv('')).toThrow('No bookmarks found in CSV file');
+    expect(() => parseRaindropCsv('title,folder\nFoo,Bar')).toThrow(
+      'CSV file must include a url column',
+    );
+    expect(() => parseRaindropCsv('url,title\n,Empty')).toThrow(
+      'No valid bookmarks found in CSV file',
+    );
+  });
+});
+

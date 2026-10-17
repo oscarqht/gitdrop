@@ -2,6 +2,13 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing';
 export function orderBetween(before?: string | null, after?: string | null): string {
   return generateKeyBetween(before ?? null, after ?? null);
 }
+export function ordersBetween(
+  count: number,
+  before?: string | null,
+  after?: string | null,
+): string[] {
+  return generateNKeysBetween(before ?? null, after ?? null, count);
+}
 export const rankBetween = orderBetween;
 export function rebalanceOrder(ids: string[]): Record<string, string> {
   const keys = generateNKeysBetween(null, null, ids.length);

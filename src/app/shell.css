@@ -352,6 +352,24 @@ p {
   align-items: center;
   gap: 6px;
 }
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: white;
+  color: inherit;
+  border: 1px solid #dce2d4;
+  border-radius: 7px;
+  padding: 11px 15px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.secondary:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
 .primary {
   display: inline-flex;
   align-items: center;

@@ -79,19 +79,29 @@ export function applyOperation(library: Library, operation: Operation): Library 
   const now = new Date().toISOString();
   const id = operation.recordId ?? operation.record?.id;
   if (id) idSchema.parse(id);
-  if (!id && operation.type !== 'clearRecovery') throw new Error('Record ID required');
+  if (!id && !operation.records?.length && operation.type !== 'clearRecovery')
+    throw new Error('Record ID required');
   if (operation.type === 'create') {
-    if (!operation.record) throw new Error('Record required');
-    if (next.records[id!] || next.tombstones[id!]) throw new Error('Record ID already exists');
-    const item = itemSchema.parse({
-      ...operation.record,
-      id,
-      revision,
-      updatedAt: now,
-      fieldRevisions: Object.fromEntries(editableFields.map((f) => [f, revision])),
-    });
-    checkParent(next, item);
-    next.records[id!] = item;
+    const records = operation.records?.length
+      ? operation.records
+      : operation.record
+        ? [{ ...operation.record, id: id! }]
+        : [];
+    if (!records.length) throw new Error('Record required');
+    for (const raw of records) {
+      const recordId = idSchema.parse(raw.id);
+      if (next.records[recordId] || next.tombstones[recordId])
+        throw new Error('Record ID already exists');
+      const item = itemSchema.parse({
+        ...raw,
+        id: recordId,
+        revision,
+        updatedAt: now,
+        fieldRevisions: Object.fromEntries(editableFields.map((f) => [f, revision])),
+      });
+      checkParent(next, item);
+      next.records[recordId] = item;
+    }
   } else if (operation.type === 'update') {
     const current = next.records[id!];
     if (!current) throw new Error('Record not found');
