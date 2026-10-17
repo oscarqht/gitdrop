@@ -836,3 +836,100 @@ it('keeps cover image URLs stable across non-cover updates when imageHash is pre
   );
 });
 
+it('renders Settings dialog with vertical tabs and toggles bookmark and collection cover image rendering mode between cover and contain', async () => {
+  snapshot.mode = 'local';
+  const col = makeItem('collection', {
+    id: 'col-art',
+    title: 'Art Collection',
+    cover: { mode: 'image', imageFile: 'col-art.webp' },
+  });
+  const bm = makeItem('bookmark', {
+    id: 'bm-art',
+    title: 'Art Piece',
+    url: 'https://art.example.com',
+    parentId: col.id,
+    cover: { mode: 'image', imageFile: 'bm-art.webp' },
+  });
+  snapshot.library.records[col.id] = col;
+  snapshot.library.records[bm.id] = bm;
+
+  const previous = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/repository' && (!init?.method || init.method === 'GET')) {
+        return response({ url: null, branch: 'main' });
+      }
+      return previous(url, init);
+    }),
+  );
+
+  const { container } = render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Art Piece')).toBeTruthy());
+
+  // Default rendering mode is cover
+  const bookmarkCoverImg = container.querySelector('.bookmarks .cover img') as HTMLImageElement;
+  expect(bookmarkCoverImg).toBeTruthy();
+  expect(bookmarkCoverImg.style.objectFit).toBe('cover');
+  expect(bookmarkCoverImg.closest('.cover')?.getAttribute('data-fit')).toBe('cover');
+  expect(container.querySelector('.app-shell')?.getAttribute('data-cover-fit')).toBe('cover');
+
+  // Open Settings dialog from sidebar
+  fireEvent.click(screen.getByText('Connect repository'));
+  const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+  expect(dialog.classList.contains('settings-dialog')).toBe(true);
+
+  const tablist = screen.getByRole('tablist', { name: 'Settings' });
+  expect(tablist.getAttribute('aria-orientation')).toBe('vertical');
+
+  const repoTab = screen.getByRole('tab', { name: /Connect your repository/i });
+  const appearanceTab = screen.getByRole('tab', { name: /Appearance/i });
+  expect(repoTab.getAttribute('aria-selected')).toBe('true');
+  expect(appearanceTab.getAttribute('aria-selected')).toBe('false');
+  expect(await screen.findByLabelText(/Git repository URL/i)).toBeTruthy();
+
+  // Switch to Appearance tab
+  fireEvent.click(appearanceTab);
+  expect(appearanceTab.getAttribute('aria-selected')).toBe('true');
+  expect(repoTab.getAttribute('aria-selected')).toBe('false');
+  expect(screen.queryByLabelText(/Git repository URL/i)).toBeNull();
+
+  const coverFitSwitch = screen.getByRole('switch') as HTMLInputElement;
+  expect(coverFitSwitch.checked).toBe(false);
+  expect(coverFitSwitch.getAttribute('aria-checked')).toBe('false');
+
+  // Toggle switch to contain
+  fireEvent.click(coverFitSwitch);
+  expect(coverFitSwitch.checked).toBe(true);
+  expect(coverFitSwitch.getAttribute('aria-checked')).toBe('true');
+  expect(localStorage.getItem('gitdrop:coverFit')).toBe('contain');
+  expect(bookmarkCoverImg.style.objectFit).toBe('contain');
+  expect(bookmarkCoverImg.closest('.cover')?.getAttribute('data-fit')).toBe('contain');
+  expect(container.querySelector('.app-shell')?.getAttribute('data-cover-fit')).toBe('contain');
+
+  // Close settings and open collection details to verify collection cover also uses contain
+  fireEvent.click(screen.getByLabelText('Close settings'));
+  const colLink = screen
+    .getAllByRole('button')
+    .find(
+      (btn) =>
+        btn.classList.contains('collection-link') && btn.textContent?.includes('Art Collection'),
+    )!;
+  fireEvent.click(colLink);
+  fireEvent.click(screen.getByTitle('Edit collection'));
+  expect(await screen.findByText('Collection details')).toBeTruthy();
+  const collectionCoverImg = container.querySelector('.detail .cover img') as HTMLImageElement;
+  expect(collectionCoverImg).toBeTruthy();
+  expect(collectionCoverImg.style.objectFit).toBe('contain');
+  expect(collectionCoverImg.closest('.cover')?.getAttribute('data-fit')).toBe('contain');
+
+  // Reopen Settings and toggle back to cover
+  fireEvent.click(screen.getByText('Connect repository'));
+  fireEvent.click(await screen.findByRole('tab', { name: /Appearance/i }));
+  fireEvent.click(screen.getByRole('switch'));
+  expect(localStorage.getItem('gitdrop:coverFit')).toBe('cover');
+  expect(bookmarkCoverImg.style.objectFit).toBe('cover');
+  expect(collectionCoverImg.style.objectFit).toBe('cover');
+});
+
+

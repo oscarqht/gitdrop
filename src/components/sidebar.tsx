@@ -7,7 +7,6 @@ import {
   History,
   ChevronRight,
   Download,
-  GitBranch,
   X,
   LogOut,
 } from 'lucide-react';
@@ -153,24 +152,12 @@ export function Sidebar({
       <div className="collection-hint">Drop to nest · Shift-drop to reorder</div>
       <div className="collection-tree">{tree(null)}</div>
       <div className="sidebar-bottom">
-        {api.data?.mode !== 'github' && (
-          <RepositorySetup
-            api={api}
-            open={openRepository}
-            setOpen={setOpenRepository}
-            onRepositoryChange={onRepositoryChange}
-          />
-        )}
-        {api.data?.mode === 'github' && (
-          <div className="repository">
-            <GitBranch size={15} />
-            <span>
-              Private repository
-              <small>Connected through GitHub</small>
-            </span>
-            <span className="green-dot" />
-          </div>
-        )}
+        <RepositorySetup
+          api={api}
+          open={openRepository}
+          setOpen={setOpenRepository}
+          onRepositoryChange={onRepositoryChange}
+        />
         <div className="sidebar-tools">
           <a href="/api/export?format=zip" title="Export library ZIP">
             <Download size={15} /> Export

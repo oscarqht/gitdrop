@@ -31,9 +31,11 @@ import { parseRaindropCsvWithCovers } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
+import { useCoverFit } from './cover';
 import type { RepositoryInfo } from './repository-setup';
 export default function LibraryApp() {
   const api = useLibrary();
+  const [coverFit] = useCoverFit();
   const [view, setView] = useState(
     () => parseUrlPath(typeof window !== 'undefined' ? window.location.pathname : '/').view,
   );
@@ -320,7 +322,7 @@ export default function LibraryApp() {
       </main>
     );
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-cover-fit={coverFit}>
       {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
       <Sidebar
         {...{

@@ -38,7 +38,7 @@
 .detail input:not([type='radio']),
 .detail textarea,
 .detail select,
-.modal input {
+.modal input:not([type='checkbox']) {
   display: block;
   width: 100%;
   border: 1px solid var(--border);
@@ -211,6 +211,158 @@
 }
 .repository-dialog .repository-help {
   font-size: 11px;
+}
+.settings-dialog {
+  width: 680px;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  min-height: 360px;
+}
+.settings-dialog h2,
+.settings-dialog h3,
+.settings-dialog p {
+  text-align: left;
+}
+.settings-sidebar {
+  width: 215px;
+  flex-shrink: 0;
+  background: #f5f7f2;
+  border-right: 1px solid var(--border);
+  padding: 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-sidebar h2 {
+  font-family: Manrope, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  padding: 0 10px;
+  color: #2f3829;
+}
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7660;
+  text-align: left;
+}
+.settings-tab:hover {
+  background: #ebf0e4;
+  color: #3f4b37;
+}
+.settings-tab.active {
+  background: #e2ead7;
+  color: var(--green);
+  font-weight: 600;
+}
+.settings-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 28px 32px;
+}
+.settings-panel h3 {
+  font-family: Manrope, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: #2f3829;
+}
+.modal label.settings-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fafbf8;
+  cursor: pointer;
+}
+.settings-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.settings-option-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3b4634;
+}
+.settings-option-desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: #7a856d;
+  line-height: 1.5;
+}
+.settings-switch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.settings-switch-mode {
+  font-size: 11px;
+  font-weight: 500;
+  color: #939d87;
+}
+.settings-switch-mode.active {
+  color: var(--green);
+  font-weight: 600;
+}
+.settings-switch-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.settings-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: #cfd7c6;
+  transition: background-color 0.15s ease;
+  display: inline-block;
+}
+.settings-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+.settings-switch-input:checked + .settings-switch-track {
+  background: var(--green);
+}
+.settings-switch-input:checked + .settings-switch-track .settings-switch-thumb {
+  transform: translateX(16px);
+}
+.settings-switch-input:focus-visible + .settings-switch-track {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
 }
 .record-row {
   display: flex;
