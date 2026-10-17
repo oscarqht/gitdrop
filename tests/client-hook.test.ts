@@ -409,4 +409,16 @@ it('opens repository setup from sidebar or local status button and saves remote 
   expect(await screen.findByText(/GitHub personal access token \(saved on server\)/i)).toBeTruthy();
 });
 
-
+it('shows the full collections hierarchy in the breadcrumb', async () => {
+  const parent = makeItem('collection', { title: 'foo' });
+  const child = makeItem('collection', { title: 'test', parentId: parent.id });
+  snapshot.library.records[parent.id] = parent;
+  snapshot.library.records[child.id] = child;
+  const { container } = render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('test')).toBeTruthy());
+  fireEvent.click(screen.getByText('test'));
+  const breadcrumb = container.querySelector('.breadcrumb');
+  expect(breadcrumb?.textContent).toBe('My libraryfootest');
+  expect(breadcrumb?.querySelector('span')?.textContent).toBe('test');
+  expect(breadcrumb?.querySelectorAll('svg')).toHaveLength(2);
+});
