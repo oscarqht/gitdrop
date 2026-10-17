@@ -1,5 +1,5 @@
 import { nativeGit, nativeGitFiles } from './git';
-import { repositoryUrl } from './repository';
+import { repositoryAuthHeader, repositoryToken, repositoryUrl } from './repository';
 import fs from 'node:fs/promises';
 import { FileScanner } from './scanner';
 import { mediaHash, mediaReference, parseMediaReference } from './media';
@@ -316,11 +316,15 @@ export class LocalStore implements Store {
       const url = exists
         ? await this.git(['config', '--local', '--get', 'remote.origin.url']).catch(() => null)
         : null;
-      return { url, branch: this.branch };
+      const hasToken = exists
+        ? Boolean(await this.git(['config', '--local', '--get', 'gitdrop.token']).catch(() => ''))
+        : false;
+      return { url, branch: this.branch, ...(hasToken ? { hasToken: true } : {}) };
     });
   }
-  async connectRepository(value: string) {
+  async connectRepository(value: string, token?: string) {
     const url = repositoryUrl(value);
+    const pat = repositoryToken(token);
     return this.lock(async () => {
       await this.ensureGit();
       const remotes = (await this.git(['remote'])).split('\n');
@@ -332,8 +336,40 @@ export class LocalStore implements Store {
         if (current) await this.git(['remote', 'remove', 'origin']);
         await this.git(['remote', 'add', 'origin', url]);
       }
+      if (pat !== undefined) {
+        await this.git(['config', '--local', 'gitdrop.token', pat]);
+      }
+      const savedToken =
+        pat ?? (await this.git(['config', '--local', '--get', 'gitdrop.token']).catch(() => ''));
+      if (savedToken) {
+        await this.git([
+          'config',
+          '--local',
+          'http.extraheader',
+          repositoryAuthHeader(savedToken),
+        ]);
+        await this.git(['config', '--local', '--unset-all', 'url.https://github.com/.insteadOf']).catch(
+          () => {},
+        );
+        if (url.startsWith('git@github.com:') || url.startsWith('ssh://git@github.com/')) {
+          await this.git([
+            'config',
+            '--local',
+            'url.https://github.com/.insteadOf',
+            'git@github.com:',
+          ]);
+          await this.git([
+            'config',
+            '--local',
+            '--add',
+            'url.https://github.com/.insteadOf',
+            'ssh://git@github.com/',
+          ]);
+        }
+        await fs.chmod(path.join(this.directory, '.git', 'config'), 0o600).catch(() => {});
+      }
       // .git/config is server-side and persists across application restarts.
-      return { url, branch: this.branch };
+      return { url, branch: this.branch, ...(savedToken ? { hasToken: true } : {}) };
     });
   }
   async sync() {

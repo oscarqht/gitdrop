@@ -365,19 +365,25 @@ it('keeps cached snapshot for an unchanged remote head and drains its pending qu
   expect(memory.get(scope)?.pending).toEqual([]);
 });
 
-it('opens repository setup from sidebar or local status button and saves remote URL', async () => {
+it('opens repository setup from sidebar or local status button and saves remote URL and GitHub PAT', async () => {
   snapshot.mode = 'local';
   let repoUrl: string | null = null;
+  let hasToken = false;
+  let savedToken: string | undefined;
   const previous = globalThis.fetch;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/repository' && (!init?.method || init.method === 'GET')) {
-        return response({ url: repoUrl, branch: 'main' });
+        return response({ url: repoUrl, branch: 'main', ...(hasToken ? { hasToken: true } : {}) });
       }
       if (url === '/api/repository' && init?.method === 'POST') {
-        const body = JSON.parse(init.body as string) as { url: string };
+        const body = JSON.parse(init.body as string) as { url: string; token?: string };
         repoUrl = body.url;
+        if (body.token) {
+          savedToken = body.token;
+          hasToken = true;
+        }
         snapshot = { ...snapshot, syncStatus: 'synced' };
         return response(structuredClone(snapshot));
       }
@@ -389,10 +395,18 @@ it('opens repository setup from sidebar or local status button and saves remote 
   expect(screen.getByText('Connect repository')).toBeTruthy();
   fireEvent.click(screen.getByTitle('Connect repository to sync'));
   const input = (await screen.findByLabelText(/Git repository URL/i)) as HTMLInputElement;
-  fireEvent.change(input, { target: { value: 'git@github.com:you/library.git' } });
+  const tokenInput = (await screen.findByLabelText(
+    /GitHub personal access token/i,
+  )) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'https://github.com/you/library.git' } });
+  fireEvent.change(tokenInput, { target: { value: 'github_pat_test123' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save & sync' }));
   await waitFor(() => expect(screen.getByText('Repository settings')).toBeTruthy());
-  expect(screen.getByText('git@github.com:you/library.git')).toBeTruthy();
+  expect(savedToken).toBe('github_pat_test123');
+  expect(screen.getByText('https://github.com/you/library.git')).toBeTruthy();
   expect(screen.getByText('Synced')).toBeTruthy();
+  fireEvent.click(screen.getByText('Repository settings'));
+  expect(await screen.findByText(/GitHub personal access token \(saved on server\)/i)).toBeTruthy();
 });
+
 

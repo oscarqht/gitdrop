@@ -6,6 +6,7 @@ import type { useLibrary } from '../client/use-library';
 export type RepositoryInfo = {
   url: string | null;
   branch: string;
+  hasToken?: boolean;
 };
 
 export function RepositorySetup({
@@ -24,6 +25,7 @@ export function RepositorySetup({
   const setOpen = setControlledOpen ?? setUncontrolledOpen;
   const [repository, setRepository] = useState<RepositoryInfo>();
   const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const load = useCallback(
@@ -94,7 +96,8 @@ export function RepositorySetup({
               setBusy(true);
               setError('');
               api.setError('');
-              const saved = await api.action('/api/repository', JSON.stringify({ url }));
+              const payload = token.trim() ? { url, token: token.trim() } : { url };
+              const saved = await api.action('/api/repository', JSON.stringify(payload));
               // Refresh even on sync failure: the saved origin is reusable for retries.
               try {
                 await load(!!saved);
@@ -102,7 +105,10 @@ export function RepositorySetup({
                 setError((e as Error).message);
               }
               setBusy(false);
-              if (saved) setOpen(false);
+              if (saved) {
+                setToken('');
+                setOpen(false);
+              }
             }}
           >
             <button
@@ -127,18 +133,35 @@ export function RepositorySetup({
                 maxLength={2048}
                 disabled={busy}
                 value={url}
-                placeholder="git@github.com:you/your-library.git"
+                placeholder="https://github.com/you/your-library.git"
                 onChange={(event) => setUrl(event.target.value)}
                 autoComplete="off"
                 spellCheck={false}
               />
             </label>
+            <label>
+              GitHub personal access token {repository?.hasToken ? '(saved on server)' : '(optional)'}
+              <input
+                type="password"
+                maxLength={512}
+                disabled={busy}
+                value={token}
+                placeholder={
+                  repository?.hasToken
+                    ? 'Saved on server — enter a new token to replace'
+                    : 'github_pat_... or ghp_...'
+                }
+                onChange={(event) => setToken(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
             <p className="repository-help">
-              SSH and HTTPS use Git credentials configured on the server. Enter a URL without a
-              token or password.
+              Enter a GitHub PAT with repository Contents read/write access to connect a private
+              repository, or leave blank to use existing server Git credentials.
             </p>
             <p className="repository-help">
-              The URL is remembered on this server
+              The URL and token are remembered on this server
               {repository ? ` for branch ${repository.branch}` : ''}. Sync runs automatically while
               the server is running.
             </p>
