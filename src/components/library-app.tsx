@@ -4,7 +4,7 @@ import { Sidebar, builtins } from './sidebar';
 import { TrashView, RecoveryView } from './recovery-views';
 import { BookmarkGrid } from './bookmark-grid';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   Search,
@@ -30,11 +30,15 @@ import { Detail } from './detail';
 import type { RepositoryInfo } from './repository-setup';
 export default function LibraryApp() {
   const api = useLibrary();
-  const [view, setView] = useState('all');
+  const [view, setView] = useState(
+    () => parseUrlPath(typeof window !== 'undefined' ? window.location.pathname : '/').view,
+  );
   const [query, setQuery] = useState('');
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
   const [sort, setSort] = useState('manual');
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState<string | undefined>(
+    () => parseUrlPath(typeof window !== 'undefined' ? window.location.pathname : '/').selected,
+  );
   const [drawer, setDrawer] = useState(false);
   const [add, setAdd] = useState(false);
   const [openRepository, setOpenRepository] = useState(false);
@@ -72,6 +76,22 @@ export default function LibraryApp() {
     }
   }
   const item = records.find((r) => r.id === selected);
+  useEffect(() => {
+    function onPopState() {
+      const next = parseUrlPath(window.location.pathname);
+      setView(next.view);
+      setSelected(next.selected);
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const nextPath = buildUrlPath(view, selected, item, inbox?.id);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, '', nextPath);
+    }
+  }, [view, selected, item, inbox?.id]);
   const bookmarks = useMemo(() => records.filter((r) => r.kind === 'bookmark'), [records]);
   const filtered = useMemo(
     () =>
@@ -534,4 +554,56 @@ export default function LibraryApp() {
 }
 function orderBefore(next?: string) {
   return orderBetween(undefined, next);
+}
+const builtinViews = new Set(['all', 'inbox', 'trash', 'recovery']);
+export function parseUrlPath(pathname: string): { view: string; selected?: string } {
+  const parts = pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
+  if (parts.length === 0) return { view: 'all' };
+  if (parts.length === 1) {
+    if (parts[0] === 'inbox') return { view: 'inbox' };
+    if (parts[0] === 'trash') return { view: 'trash' };
+    if (parts[0] === 'recovery') return { view: 'recovery' };
+  }
+  if (parts[0] === 'collections' && parts[1]) {
+    const colId = parts[1];
+    const view = colId === 'all' ? 'all' : colId === 'inbox' ? 'inbox' : colId;
+    if (parts[2] === 'bookmarks' && parts[3]) {
+      return { view, selected: parts[3] };
+    }
+    return { view };
+  }
+  if (parts[0] === 'bookmarks' && parts[1]) {
+    return { view: 'all', selected: parts[1] };
+  }
+  if (parts[0] === 'inbox' && parts[1] === 'bookmarks' && parts[2]) {
+    return { view: 'inbox', selected: parts[2] };
+  }
+  return { view: 'all' };
+}
+export function buildUrlPath(
+  view: string,
+  selected: string | undefined,
+  item: Item | undefined,
+  inboxId: string | undefined,
+): string {
+  if (selected && item?.kind !== 'collection' && selected !== view) {
+    const colId =
+      item?.parentId ||
+      (!builtinViews.has(view) ? view : view === 'inbox' ? inboxId || 'inbox' : 'all');
+    return `/collections/${encodeURIComponent(colId)}/bookmarks/${encodeURIComponent(selected)}`;
+  }
+  if (view === 'all') return '/';
+  if (view === 'inbox') return '/inbox';
+  if (view === 'trash') return '/trash';
+  if (view === 'recovery') return '/recovery';
+  return `/collections/${encodeURIComponent(view)}`;
 }
