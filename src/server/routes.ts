@@ -23,6 +23,7 @@ import {
 import { fetchMetadata, optimizeImage } from './metadata';
 import { exportHtml } from './export';
 import { startSyncWorker, syncNow } from './sync-worker';
+import { repositoryUrl } from '../storage/repository';
 
 const operationSchema = z
   .object({
@@ -95,6 +96,36 @@ export const operationPost = handler(async (request) => {
   return snapshot(await (await getStore()).mutate(op));
 }, true);
 export const syncPost = handler(async () => snapshot(await syncNow()), true);
+export const repositoryGet = handler(async () => {
+  const store = getStore();
+  if (hosted() || !(store instanceof LocalStore))
+    throw new HttpError(
+      400,
+      'Repository setup is available in local mode. Hosted repositories use server environment settings.',
+    );
+  return json(await store.repository());
+});
+export const repositoryPost = handler(async (request) => {
+  if (hosted() || !(getStore() instanceof LocalStore))
+    throw new HttpError(
+      400,
+      'Repository setup is available in local mode. Hosted repositories use server environment settings.',
+    );
+  const { url } = z
+    .object({ url: z.string().max(2048) })
+    .strict()
+    .parse(await readJson(request, 4096));
+  const validated = repositoryUrl(url);
+  try {
+    return snapshot(await syncNow(validated));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Connection failed.';
+    throw new HttpError(
+      400,
+      `${message}. The repository URL is saved once configured; retry here or use Sync now. Check Git access on the server if needed.`,
+    );
+  }
+}, true);
 export const metadataPost = handler(async (request) => {
   const { recordId } = z.object({ recordId: idSchema }).parse(await readJson(request));
   const store = await getStore();

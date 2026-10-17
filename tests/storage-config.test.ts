@@ -27,3 +27,26 @@ it('requires hosted credentials and accepts the repository setting', async () =>
   vi.stubEnv('GITHUB_TOKEN', 'test-token');
   expect(getStore()).toBeInstanceOf(GitHubStore);
 });
+
+it('accepts SSH and HTTPS repository URLs and rejects embedded credentials or Git transports', async () => {
+  const { repositoryUrl } = await import('../src/storage/repository');
+  for (const url of [
+    'git@github.com:owner/library.git',
+    'ssh://git@github.com/owner/library.git',
+    'ssh://git@example.test:2222/library.git',
+    'https://github.com/owner/library.git',
+  ])
+    expect(repositoryUrl(` ${url} `)).toBe(url);
+  for (const url of [
+    '',
+    '-repo',
+    'ext::command',
+    '/tmp/repo',
+    'file:///tmp/repo',
+    'https://token@github.com/owner/repo',
+    'ssh://git:token@example.test/repo',
+    'https://example.test',
+    'https://example.test/repo?token=secret',
+  ])
+    expect(() => repositoryUrl(url)).toThrow('Invalid repository URL');
+});

@@ -1,4 +1,5 @@
 import { nativeGit, nativeGitFiles } from './git';
+import { repositoryUrl } from './repository';
 import fs from 'node:fs/promises';
 import { FileScanner } from './scanner';
 import { mediaHash, mediaReference, parseMediaReference } from './media';
@@ -300,17 +301,48 @@ export class LocalStore implements Store {
   private gitFiles(ref: string) {
     return nativeGitFiles(this.directory, ref);
   }
+  private async ensureGit() {
+    // Do not accidentally use a parent checkout when the data directory is nested.
+    const ownGit = await fs.lstat(path.join(this.directory, '.git')).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (!ownGit) await this.git(['init', '-b', this.branch]);
+    else if (ownGit.isSymbolicLink()) throw new Error('Git directory cannot be a symlink');
+  }
+  async repository() {
+    return this.lock(async () => {
+      const exists = await fs.lstat(path.join(this.directory, '.git')).catch(() => null);
+      const url = exists
+        ? await this.git(['config', '--local', '--get', 'remote.origin.url']).catch(() => null)
+        : null;
+      return { url, branch: this.branch };
+    });
+  }
+  async connectRepository(value: string) {
+    const url = repositoryUrl(value);
+    return this.lock(async () => {
+      await this.ensureGit();
+      const remotes = (await this.git(['remote'])).split('\n');
+      const current = remotes.includes('origin')
+        ? await this.git(['config', '--local', '--get', 'remote.origin.url'])
+        : null;
+      if (current !== url) {
+        // Remove stale tracking refs and push URLs when switching repositories.
+        if (current) await this.git(['remote', 'remove', 'origin']);
+        await this.git(['remote', 'add', 'origin', url]);
+      }
+      // .git/config is server-side and persists across application restarts.
+      return { url, branch: this.branch };
+    });
+  }
   async sync() {
     return this.lock(async () => {
       let files = await this.scan();
       let parsed = decodeFiles(files, this.actor);
       if (parsed.diagnostics.length) throw new Error(parsed.diagnostics.join('\n'));
       await this.write(encodeFiles(parsed.library, files, parsed.paths), files);
-      try {
-        await this.git(['rev-parse', '--git-dir']);
-      } catch {
-        await this.git(['init', '-b', this.branch]);
-      }
+      await this.ensureGit();
       await this.git([
         'add',
         '--all',
@@ -350,11 +382,13 @@ export class LocalStore implements Store {
         const local = await this.git(['rev-parse', 'HEAD']);
         const remote = await this.git(['rev-parse', `refs/remotes/origin/${this.branch}`]);
         if (local !== remote) {
-          const base = await this.git(['merge-base', local, remote]);
+          const base = await this.git(['merge-base', local, remote]).catch(() => null);
           const [baseFiles, remoteFiles] = await Promise.all([
-            this.gitFiles(base),
+            base ? this.gitFiles(base) : Promise.resolve(new Map() as Files),
             this.gitFiles(remote),
           ]);
+          if (!remoteFiles.has('.gitdrop/state.json'))
+            throw new Error('Remote must be empty or contain an existing Gitdrop library.');
           files = await this.scan();
           parsed = decodeFiles(files, this.actor);
           const remoteParsed = decodeFiles(remoteFiles, 'external-remote');

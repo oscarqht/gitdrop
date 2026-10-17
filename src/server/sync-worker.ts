@@ -1,4 +1,4 @@
-import { getStore } from '../storage';
+import { getStore, LocalStore } from '../storage';
 import { hosted } from './auth';
 type Worker = {
   timer?: ReturnType<typeof setInterval>;
@@ -16,14 +16,20 @@ export function syncState(revision?: string) {
     syncError: s.error,
   };
 }
-export async function syncNow() {
+export async function syncNow(repositoryUrl?: string) {
   const s = state();
   if (s.running) throw new Error('Sync is already running; retry shortly.');
   s.running = true;
   s.status = 'syncing';
   s.error = undefined;
   try {
-    const result = await getStore().sync();
+    const store = getStore();
+    if (repositoryUrl !== undefined) {
+      if (!(store instanceof LocalStore)) throw new Error('Repository setup requires local mode.');
+      await store.initialize();
+      await store.connectRepository(repositoryUrl);
+    }
+    const result = await store.sync();
     s.status = result.status?.startsWith('Local only') ? 'idle' : 'synced';
     s.revision = result.revision;
     return result;

@@ -19,27 +19,24 @@ Do not set a custom `NODE_ENV`: Next's dev/build/start commands select the corre
 
 ## Connect your private repository
 
-Create an empty private GitHub repository. Initialize and publish your local data:
+Create an empty private GitHub repository, then open **Connect repository** at the bottom of the webapp sidebar. Paste its SSH or HTTPS Git URL and choose **Save & sync**. Gitdrop initializes the local Git repository, commits your library, and publishes it. You can reopen **Repository settings** to view or update the URL.
+
+The URL is saved on the server in the data directory's `.git/config` as `origin`. Restarting the server or reopening the browser reuses it automatically. No repository initialization commands are needed. SSH keys or a Git credential helper must already grant the server access; use a URL without an embedded token or password. Connection errors leave local bookmarks safe and the configured URL available for retry.
+
+On another device, launch Gitdrop and enter the same URL. An existing Gitdrop library is fetched and merged with local bookmarks before publishing. Use an empty repository or one containing a Gitdrop library; an unrelated repository is rejected without overwriting it.
+
+The configured branch defaults to `main`; use `GITDROP_BRANCH` consistently on all clients. `GITDROP_DATA_DIR` chooses the local data directory. PowerShell users set environment variables with `$env:GITDROP_DATA_DIR = 'C:\Users\you\Gitdrop'`.
+
+The CLI remains available for manual setup:
 
 ```sh
 npm run library -- init
 npm run library -- sync
-```
-
-The second command initializes the local Git repository and makes a local commit. Configure `origin` in the printed data directory using your normal Git SSH or credential-helper setup, then run sync again:
-
-```sh
 git -C "$HOME/.gitdrop/library" remote add origin git@github.com:YOUR_ACCOUNT/YOUR_DATA_REPO.git
 npm run library -- sync
-```
-
-On another device:
-
-```sh
+# Alternatively clone on another device and launch with GITDROP_DATA_DIR set to the destination:
 npm run library -- clone git@github.com:YOUR_ACCOUNT/YOUR_DATA_REPO.git /absolute/path/to/library
 ```
-
-Set `GITDROP_DATA_DIR` to that destination when launching. PowerShell users set environment variables with `$env:GITDROP_DATA_DIR = 'C:\Users\you\Gitdrop'`. The configured branch defaults to `main`; use `GITDROP_BRANCH` consistently on all clients.
 
 The server starts an automatic sync worker after the first library request, then syncs every 60 seconds. Local saves are immediate; commits and publication are batched at sync time. `Sync now` also runs the same serialized pipeline. Without an origin, the library stays usable and the status remains local. External valid file edits are detected on reads and sync; browser views refresh periodically and on focus.
 

@@ -13,7 +13,15 @@ export async function nativeGit(
       const child = execFile(
         'git',
         args,
-        { cwd: directory, maxBuffer: 100 * 1024 * 1024 },
+        {
+          cwd: directory,
+          maxBuffer: 100 * 1024 * 1024,
+          timeout: 60_000,
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        },
         (e, out) => (e ? reject(new Error(`Git ${args[0]} failed`)) : resolve(out.trim())),
       );
       child.stdin?.end(input);
@@ -21,7 +29,15 @@ export async function nativeGit(
   }
   try {
     return (
-      await exec('git', args, { cwd: directory, maxBuffer: 100 * 1024 * 1024 })
+      await exec('git', args, {
+        cwd: directory,
+        maxBuffer: 100 * 1024 * 1024,
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+        },
+      })
     ).stdout.trim();
   } catch {
     throw new Error(`Git ${args[0]} failed; check repository configuration and credentials`);

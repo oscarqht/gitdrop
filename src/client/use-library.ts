@@ -239,9 +239,12 @@ export function useLibrary() {
       state.current = { snapshot: next, pending: state.current?.pending || [] };
       await publish();
       setStatus(confirmedStatus(state.current?.snapshot));
+      setError('');
+      return true;
     } catch (e) {
       setError(networkMessage(e));
       setStatus('Failed');
+      return false;
     }
   };
   const recoverPending = async () => {

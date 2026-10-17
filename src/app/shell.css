@@ -216,6 +216,15 @@ a:focus-visible {
   font-size: 10px;
   margin-top: 4px;
 }
+.repository-button {
+  width: 100%;
+  text-align: left;
+  border-radius: 6px;
+  padding: 6px 0;
+}
+.repository-button:hover {
+  color: var(--accent);
+}
 .green-dot {
   background: #789762;
   border-radius: 50%;

@@ -14,6 +14,7 @@ import {
 import type { Dispatch, SetStateAction } from 'react';
 import type { Item } from '../domain/types';
 import type { useLibrary } from '../client/use-library';
+import { RepositorySetup } from './repository-setup';
 export const builtins = [
   { id: 'all', name: 'All bookmarks', icon: Layers },
   { id: 'inbox', name: 'Inbox', icon: Inbox },
@@ -139,16 +140,17 @@ export function Sidebar({
       <div className="collection-hint">Drop to nest · Shift-drop to reorder</div>
       <div className="collection-tree">{tree(null)}</div>
       <div className="sidebar-bottom">
-        <div className="repository">
-          <GitBranch size={15} />
-          <span>
-            Private repository
-            <small>
-              {api.data?.mode === 'github' ? 'Connected through GitHub' : 'Local-first workspace'}
-            </small>
-          </span>
-          <span className="green-dot" />
-        </div>
+        {api.data?.mode === 'local' && <RepositorySetup api={api} />}
+        {api.data?.mode === 'github' && (
+          <div className="repository">
+            <GitBranch size={15} />
+            <span>
+              Private repository
+              <small>Connected through GitHub</small>
+            </span>
+            <span className="green-dot" />
+          </div>
+        )}
         <div className="sidebar-tools">
           <a href="/api/export?format=zip" title="Export library ZIP">
             <Download size={15} /> Export

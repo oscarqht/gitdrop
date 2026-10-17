@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import AdmZip from 'adm-zip';
 import { LocalStore } from '../src/storage/local';
@@ -27,6 +28,8 @@ import {
   exportGet,
   sessionGet,
   syncPost,
+  repositoryGet,
+  repositoryPost,
 } from '../src/server/routes';
 const request = (route: string, body?: unknown) =>
   new Request(
@@ -89,7 +92,7 @@ describe('application API', () => {
     );
     expect(result.status).toBe(200);
     const updated = (await result.json()).library.records.book;
-    expect(updated.variants[0].name).toBe('Default');
+    expect(updated.variants.find((variant: { id: string }) => variant.id === record.variants[0].id)?.name).toBe('Default');
     expect(updated.title).toBe('Shared title');
     const html = await (await exportGet(request('export?format=html'))).text();
     expect(html).toContain('Shared title — Documentation');
@@ -207,5 +210,135 @@ describe('hosted conditional reads', () => {
       new Request('https://library.example/api/media?recordId=book&hash=bad', { headers }),
     );
     expect(invalid.status).toBe(400);
+  });
+});
+
+describe('web repository setup', () => {
+  const url = 'https://example.test/library.git';
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  async function remote() {
+    const location = path.join(directory, 'remote.git');
+    await fs.mkdir(location);
+    git(location, 'init', '--bare', '--initial-branch=main');
+    // Exercise real Git operations without contacting an external service.
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', `url.file://${location}.insteadOf`);
+    vi.stubEnv('GIT_CONFIG_VALUE_0', url);
+    shared.store = new LocalStore(path.join(directory, 'library'));
+    await shared.store.initialize();
+    return location;
+  }
+  it('initializes, publishes, remembers the URL after restart, and connects another device', async () => {
+    const location = await remote();
+    expect(await (await repositoryGet(request('repository'))).json()).toEqual({
+      url: null,
+      branch: 'main',
+    });
+    await create();
+    const connected = await repositoryPost(request('repository', { url }));
+    expect(connected.status).toBe(200);
+    expect((await connected.json()).library.records.book.title).toBe('example.com');
+    expect(git(location, 'ls-tree', '-r', '--name-only', 'main')).toContain('.gitdrop/state.json');
+    shared.store = new LocalStore(path.join(directory, 'library'));
+    expect(await (await repositoryGet(request('repository'))).json()).toEqual({
+      url,
+      branch: 'main',
+    });
+    expect((await syncPost(request('sync', {}))).status).toBe(200);
+    shared.store = new LocalStore(path.join(directory, 'second-device'));
+    await shared.store.initialize();
+    await shared.store.mutate({
+      id: 'local',
+      actor: 'second',
+      type: 'create',
+      record: makeItem('bookmark', {
+        id: 'local-book',
+        title: 'Local bookmark',
+        url: 'https://local.example',
+      }),
+    });
+    const second = await repositoryPost(request('repository', { url }));
+    expect(second.status).toBe(200);
+    const library = (await second.json()).library;
+    expect(library.records.book.title).toBe('example.com');
+    expect(library.records['local-book'].title).toBe('Local bookmark');
+    expect((await shared.store.read()).diagnostics).toEqual([]);
+    expect(await new LocalStore(path.join(directory, 'library')).sync()).toMatchObject({
+      status: 'Synced',
+    });
+  });
+  it('keeps a saved URL and local edits when credentials or connectivity fail', async () => {
+    await remote();
+    await create();
+    vi.stubEnv('GIT_CONFIG_KEY_0', `url.file://${path.join(directory, 'missing.git')}.insteadOf`);
+    const failed = await repositoryPost(request('repository', { url }));
+    expect(failed.status).toBe(400);
+    expect((await failed.json()).error).toContain('Check Git access');
+    expect(await shared.store.repository()).toEqual({ url, branch: 'main' });
+    expect((await shared.store.read()).library.records.book).toBeDefined();
+  });
+  it('rejects a non-Gitdrop repository without overwriting it', async () => {
+    const location = await remote();
+    const seed = path.join(directory, 'seed');
+    await fs.mkdir(seed);
+    git(seed, 'init', '-b', 'main');
+    await fs.writeFile(path.join(seed, 'README.md'), 'Unrelated repository');
+    git(seed, 'add', '.');
+    git(seed, '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '-m', 'Seed');
+    git(seed, 'push', location, 'main');
+    const head = git(location, 'rev-parse', 'main');
+    const response = await repositoryPost(request('repository', { url }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain('Remote must be empty');
+    expect(git(location, 'rev-parse', 'main')).toBe(head);
+  });
+  it('rejects invalid URLs, cross-origin writes, and hosted setup', async () => {
+    for (const url of [
+      '--upload-pack=evil',
+      'ext::command',
+      'file:///tmp/repo',
+      'https://token@github.com/you/repo',
+      'ssh://git:secret@host/repo',
+      'git@host:repo\ncommand',
+    ]) {
+      expect((await repositoryPost(request('repository', { url }))).status).toBe(400);
+    }
+    expect((await shared.store.repository()).url).toBeNull();
+    expect(
+      (
+        await repositoryPost(
+          new Request('http://127.0.0.1:3000/api/repository', {
+            method: 'POST',
+            headers: { origin: 'https://evil.example' },
+            body: JSON.stringify({ url }),
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    vi.stubEnv('GITDROP_MODE', 'github');
+    vi.stubEnv('GITDROP_APP_URL', 'https://library.example');
+    vi.stubEnv('GITDROP_SESSION_SECRET', 'x'.repeat(32));
+    vi.stubEnv('GITDROP_GITHUB_USER', 'owner');
+    const { sign } = await import('../src/server/auth');
+    const headers = {
+      origin: 'https://library.example',
+      cookie: `gitdrop-session=${sign({ user: 'owner', purpose: 'session', exp: Date.now() + 10000 })}`,
+    };
+    expect(
+      (
+        await repositoryPost(
+          new Request('https://library.example/api/repository', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ url }),
+          }),
+        )
+      ).status,
+    ).toBe(400);
   });
 });
