@@ -449,6 +449,10 @@ export default function LibraryApp() {
               <BookmarkGrid
                 {...{ layout, filtered, selected, setSelected, sort, setDrag, move, collections }}
                 disabled={api.disabled}
+                onDelete={(b) => {
+                  void api.mutate({ type: 'delete', recordId: b.id, base: b });
+                  if (selected === b.id) setSelected(undefined);
+                }}
               />
               {!filtered.length && (
                 <div className="empty">

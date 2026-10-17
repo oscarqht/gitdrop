@@ -318,8 +318,18 @@ export function Detail({
           <button
             className="icon-button danger"
             aria-label="Move to trash"
+            title="Delete"
             disabled={disabled}
-            onClick={onDelete}
+            onClick={() => {
+              if (
+                confirm(
+                  item.kind === 'collection'
+                    ? 'Move this collection to trash?'
+                    : 'Move this bookmark to trash?',
+                )
+              )
+                onDelete();
+            }}
           >
             <Trash2 size={17} />
           </button>
