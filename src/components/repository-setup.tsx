@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GitBranch, X } from 'lucide-react';
 import type { useLibrary } from '../client/use-library';
 
@@ -77,110 +78,113 @@ export function RepositorySetup({
           <span className="repository-action">Set URL</span>
         )}
       </button>
-      {open && (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            if (!busy) setOpen(false);
-          }}
-        >
-          <form
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="repository-title"
-            className="modal repository-dialog"
-            onClick={(event) => event.stopPropagation()}
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (busy) return;
-              setBusy(true);
-              setError('');
-              api.setError('');
-              const payload = token.trim() ? { url, token: token.trim() } : { url };
-              const saved = await api.action('/api/repository', JSON.stringify(payload));
-              // Refresh even on sync failure: the saved origin is reusable for retries.
-              try {
-                await load(!!saved);
-              } catch (e) {
-                setError((e as Error).message);
-              }
-              setBusy(false);
-              if (saved) {
-                setToken('');
-                setOpen(false);
-              }
+      {open &&
+        createPortal(
+          <div
+            className="modal-backdrop"
+            onClick={() => {
+              if (!busy) setOpen(false);
             }}
           >
-            <button
-              type="button"
-              className="modal-close icon-button"
-              aria-label="Close repository settings"
-              disabled={busy}
-              onClick={() => setOpen(false)}
-            >
-              <X size={19} />
-            </button>
-            <h2 id="repository-title">Connect your repository</h2>
-            <p>
-              Use an empty private repository or an existing Gitdrop library. Your local bookmarks
-              are kept.
-            </p>
-            <label>
-              Git repository URL
-              <input
-                autoFocus
-                required
-                maxLength={2048}
-                disabled={busy}
-                value={url}
-                placeholder="https://github.com/you/your-library.git"
-                onChange={(event) => setUrl(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            <label>
-              GitHub personal access token {repository?.hasToken ? '(saved on server)' : '(optional)'}
-              <input
-                type="password"
-                maxLength={512}
-                disabled={busy}
-                value={token}
-                placeholder={
-                  repository?.hasToken
-                    ? 'Saved on server — enter a new token to replace'
-                    : 'github_pat_... or ghp_...'
+            <form
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="repository-title"
+              className="modal repository-dialog"
+              onClick={(event) => event.stopPropagation()}
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (busy) return;
+                setBusy(true);
+                setError('');
+                api.setError('');
+                const payload = token.trim() ? { url, token: token.trim() } : { url };
+                const saved = await api.action('/api/repository', JSON.stringify(payload));
+                // Refresh even on sync failure: the saved origin is reusable for retries.
+                try {
+                  await load(!!saved);
+                } catch (e) {
+                  setError((e as Error).message);
                 }
-                onChange={(event) => setToken(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            <p className="repository-help">
-              Enter a GitHub PAT with repository Contents read/write access to connect a private
-              repository, or leave blank to use existing server Git credentials.
-            </p>
-            <p className="repository-help">
-              The URL and token are remembered on this server
-              {repository ? ` for branch ${repository.branch}` : ''}. Sync runs automatically while
-              the server is running.
-            </p>
-            {(error || api.error) && (
-              <p role="alert" className="repository-error">
-                {error || api.error}
+                setBusy(false);
+                if (saved) {
+                  setToken('');
+                  setOpen(false);
+                }
+              }}
+            >
+              <button
+                type="button"
+                className="modal-close icon-button"
+                aria-label="Close repository settings"
+                disabled={busy}
+                onClick={() => setOpen(false)}
+              >
+                <X size={19} />
+              </button>
+              <h2 id="repository-title">Connect your repository</h2>
+              <p>
+                Use an empty private repository or an existing Gitdrop library. Your local bookmarks
+                are kept.
               </p>
-            )}
-            <div className="modal-footer">
-              <button type="button" disabled={busy} onClick={() => setOpen(false)}>
-                Cancel
-              </button>
-              <button className="primary" disabled={busy || api.disabled || !url.trim()}>
-                {busy ? 'Connecting & syncing…' : 'Save & sync'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+              <label>
+                Git repository URL
+                <input
+                  autoFocus
+                  required
+                  maxLength={2048}
+                  disabled={busy}
+                  value={url}
+                  placeholder="https://github.com/you/your-library.git"
+                  onChange={(event) => setUrl(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label>
+                GitHub personal access token{' '}
+                {repository?.hasToken ? '(saved on server)' : '(optional)'}
+                <input
+                  type="password"
+                  maxLength={512}
+                  disabled={busy}
+                  value={token}
+                  placeholder={
+                    repository?.hasToken
+                      ? 'Saved on server — enter a new token to replace'
+                      : 'github_pat_... or ghp_...'
+                  }
+                  onChange={(event) => setToken(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <p className="repository-help">
+                Enter a GitHub PAT with repository Contents read/write access to connect a private
+                repository, or leave blank to use existing server Git credentials.
+              </p>
+              <p className="repository-help">
+                The URL and token are remembered on this server
+                {repository ? ` for branch ${repository.branch}` : ''}. Sync runs automatically
+                while the server is running.
+              </p>
+              {(error || api.error) && (
+                <p role="alert" className="repository-error">
+                  {error || api.error}
+                </p>
+              )}
+              <div className="modal-footer">
+                <button type="button" disabled={busy} onClick={() => setOpen(false)}>
+                  Cancel
+                </button>
+                <button className="primary" disabled={busy || api.disabled || !url.trim()}>
+                  {busy ? 'Connecting & syncing…' : 'Save & sync'}
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

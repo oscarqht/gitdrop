@@ -88,6 +88,7 @@
 }
 .bookmark {
   position: relative;
+  z-index: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: white;
