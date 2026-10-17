@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { createElement } from 'react';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { renderHook, act, waitFor, cleanup } from '@testing-library/react';
+import { render, renderHook, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { useLibrary } from '../src/client/use-library';
+import LibraryApp from '../src/components/library-app';
 import { applyOperation, createLibrary, makeItem } from '../src/domain/operations';
 import type { Operation } from '../src/domain/types';
 import type { Cache, Snapshot } from '../src/client/store';
@@ -29,6 +31,26 @@ let scope = 'account/repo';
 let operations: Operation[];
 let rejectOnce = false;
 let authenticated = true;
+if (!globalThis.localStorage) {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => [...store.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      store.set(key, String(value));
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  if (typeof window !== 'undefined')
+    Object.defineProperty(window, 'localStorage', { configurable: true, value: storage });
+}
 beforeEach(() => {
   memory.clear();
   localStorage.clear();
@@ -342,3 +364,35 @@ it('keeps cached snapshot for an unchanged remote head and drains its pending qu
   expect(operations[0].id).toBe('pending-unchanged');
   expect(memory.get(scope)?.pending).toEqual([]);
 });
+
+it('opens repository setup from sidebar or local status button and saves remote URL', async () => {
+  snapshot.mode = 'local';
+  let repoUrl: string | null = null;
+  const previous = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/repository' && (!init?.method || init.method === 'GET')) {
+        return response({ url: repoUrl, branch: 'main' });
+      }
+      if (url === '/api/repository' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as { url: string };
+        repoUrl = body.url;
+        snapshot = { ...snapshot, syncStatus: 'synced' };
+        return response(structuredClone(snapshot));
+      }
+      return previous(url, init);
+    }),
+  );
+  render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Saved locally')).toBeTruthy());
+  expect(screen.getByText('Connect repository')).toBeTruthy();
+  fireEvent.click(screen.getByTitle('Connect repository to sync'));
+  const input = (await screen.findByLabelText(/Git repository URL/i)) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'git@github.com:you/library.git' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save & sync' }));
+  await waitFor(() => expect(screen.getByText('Repository settings')).toBeTruthy());
+  expect(screen.getByText('git@github.com:you/library.git')).toBeTruthy();
+  expect(screen.getByText('Synced')).toBeTruthy();
+});
+

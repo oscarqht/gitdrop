@@ -14,7 +14,7 @@ import {
 import type { Dispatch, SetStateAction } from 'react';
 import type { Item } from '../domain/types';
 import type { useLibrary } from '../client/use-library';
-import { RepositorySetup } from './repository-setup';
+import { RepositorySetup, type RepositoryInfo } from './repository-setup';
 export const builtins = [
   { id: 'all', name: 'All bookmarks', icon: Layers },
   { id: 'inbox', name: 'Inbox', icon: Inbox },
@@ -35,6 +35,9 @@ type Props = {
   setCollapsed: Dispatch<SetStateAction<Set<string>>>;
   setDrag: Dispatch<SetStateAction<string | undefined>>;
   move: (target: Item, asChild?: boolean) => void;
+  openRepository?: boolean;
+  setOpenRepository?: Dispatch<SetStateAction<boolean>>;
+  onRepositoryChange?: (repository: RepositoryInfo) => void;
 };
 export function Sidebar({
   api,
@@ -50,6 +53,9 @@ export function Sidebar({
   setCollapsed,
   setDrag,
   move,
+  openRepository,
+  setOpenRepository,
+  onRepositoryChange,
 }: Props) {
   function tree(parent: string | null, depth = 0, seen = new Set<string>()): React.ReactNode {
     return collections
@@ -140,7 +146,14 @@ export function Sidebar({
       <div className="collection-hint">Drop to nest · Shift-drop to reorder</div>
       <div className="collection-tree">{tree(null)}</div>
       <div className="sidebar-bottom">
-        {api.data?.mode === 'local' && <RepositorySetup api={api} />}
+        {api.data?.mode !== 'github' && (
+          <RepositorySetup
+            api={api}
+            open={openRepository}
+            setOpen={setOpenRepository}
+            onRepositoryChange={onRepositoryChange}
+          />
+        )}
         {api.data?.mode === 'github' && (
           <div className="repository">
             <GitBranch size={15} />

@@ -1,58 +1,93 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useState } from 'react';
 import { GitBranch, X } from 'lucide-react';
 import type { useLibrary } from '../client/use-library';
 
-export function RepositorySetup({ api }: { api: ReturnType<typeof useLibrary> }) {
-  const [repository, setRepository] = useState<{
-    url: string | null;
-    branch: string;
-  }>();
+export type RepositoryInfo = {
+  url: string | null;
+  branch: string;
+};
+
+export function RepositorySetup({
+  api,
+  open: controlledOpen,
+  setOpen: setControlledOpen,
+  onRepositoryChange,
+}: {
+  api: ReturnType<typeof useLibrary>;
+  open?: boolean;
+  setOpen?: (open: boolean) => void;
+  onRepositoryChange?: (repository: RepositoryInfo) => void;
+}) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = setControlledOpen ?? setUncontrolledOpen;
+  const [repository, setRepository] = useState<RepositoryInfo>();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const dialog = useRef<HTMLDialogElement>(null);
-  async function load(updateInput = true) {
-    const response = await fetch('/api/repository');
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not load repository settings.');
-    setRepository(data);
-    if (updateInput) setUrl(data.url || '');
-  }
+  const load = useCallback(
+    async (updateInput = true) => {
+      const response = await fetch('/api/repository');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load repository settings.');
+      setRepository(data);
+      onRepositoryChange?.(data);
+      if (updateInput) setUrl(data.url || '');
+    },
+    [onRepositoryChange],
+  );
   useEffect(() => {
     void load().catch(() => {});
-  }, []);
+  }, [load]);
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) setOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, open, setOpen]);
+  function openModal() {
+    setError('');
+    api.setError('');
+    setOpen(true);
+    void load().catch((e) => setError((e as Error).message));
+  }
   return (
     <>
       <button
+        type="button"
         className="repository repository-button"
         disabled={api.disabled}
-        onClick={() => {
-          setError('');
-          api.setError('');
-          dialog.current?.showModal();
-          void load().catch((e) => setError(e.message));
-        }}
+        onClick={openModal}
       >
         <GitBranch size={15} />
-        <span>
+        <span className="ellipsis">
           {repository?.url ? 'Repository settings' : 'Connect repository'}
-          <small>
-            {repository?.url ? 'URL saved on this server' : 'Sync your library across devices'}
+          <small className="ellipsis">
+            {repository?.url || 'Set remote Git URL to sync'}
           </small>
         </span>
+        {repository?.url ? (
+          <span className="green-dot" />
+        ) : (
+          <span className="repository-action">Set URL</span>
+        )}
       </button>
-      {createPortal(
-        <dialog
-          ref={dialog}
-          className="modal repository-dialog"
-          aria-labelledby="repository-title"
-          onCancel={(event) => {
-            if (busy) event.preventDefault();
+      {open && (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!busy) setOpen(false);
           }}
         >
           <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="repository-title"
+            className="modal repository-dialog"
+            onClick={(event) => event.stopPropagation()}
             onSubmit={async (event) => {
               event.preventDefault();
               if (busy) return;
@@ -67,7 +102,7 @@ export function RepositorySetup({ api }: { api: ReturnType<typeof useLibrary> })
                 setError((e as Error).message);
               }
               setBusy(false);
-              if (saved) dialog.current?.close();
+              if (saved) setOpen(false);
             }}
           >
             <button
@@ -75,7 +110,7 @@ export function RepositorySetup({ api }: { api: ReturnType<typeof useLibrary> })
               className="modal-close icon-button"
               aria-label="Close repository settings"
               disabled={busy}
-              onClick={() => dialog.current?.close()}
+              onClick={() => setOpen(false)}
             >
               <X size={19} />
             </button>
@@ -113,7 +148,7 @@ export function RepositorySetup({ api }: { api: ReturnType<typeof useLibrary> })
               </p>
             )}
             <div className="modal-footer">
-              <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>
+              <button type="button" disabled={busy} onClick={() => setOpen(false)}>
                 Cancel
               </button>
               <button className="primary" disabled={busy || api.disabled || !url.trim()}>
@@ -121,8 +156,7 @@ export function RepositorySetup({ api }: { api: ReturnType<typeof useLibrary> })
               </button>
             </div>
           </form>
-        </dialog>,
-        document.body,
+        </div>
       )}
     </>
   );
