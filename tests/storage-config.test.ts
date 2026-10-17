@@ -50,3 +50,17 @@ it('accepts SSH and HTTPS repository URLs and rejects embedded credentials or Gi
   ])
     expect(() => repositoryUrl(url)).toThrow('Invalid repository URL');
 });
+
+it('validates optional GitHub personal access tokens and encodes auth headers', async () => {
+  const { repositoryToken, repositoryAuthHeader } = await import('../src/storage/repository');
+  expect(repositoryToken()).toBeUndefined();
+  expect(repositoryToken('   ')).toBeUndefined();
+  expect(repositoryToken(' github_pat_12345_abc ')).toBe('github_pat_12345_abc');
+  expect(repositoryAuthHeader('ghp_test123')).toBe(
+    `Authorization: Basic ${Buffer.from('x-access-token:ghp_test123').toString('base64')}`,
+  );
+  for (const bad of ['ghp_with space', 'ghp_with\nnewline', 'x'.repeat(513)]) {
+    expect(() => repositoryToken(bad)).toThrow('Invalid GitHub personal access token');
+  }
+});
+

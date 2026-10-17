@@ -272,6 +272,34 @@ describe('web repository setup', () => {
       status: 'Synced',
     });
   });
+  it('saves and remembers a GitHub PAT on the server without exposing the raw token or committing it', async () => {
+    const location = await remote();
+    await create();
+    const token = 'github_pat_secretToken123';
+    const connected = await repositoryPost(request('repository', { url, token }));
+    expect(connected.status).toBe(200);
+    // Recreate store to verify server persistence across restarts
+    shared.store = new LocalStore(path.join(directory, 'library'));
+    const info = await (await repositoryGet(request('repository'))).json();
+    expect(info).toEqual({
+      url,
+      branch: 'main',
+      hasToken: true,
+    });
+    expect(JSON.stringify(info)).not.toContain(token);
+    expect(
+      git(path.join(directory, 'library'), 'config', '--local', '--get', 'http.extraheader'),
+    ).toBe(`Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`);
+    // Subsequent updates without re-entering token preserve the remembered token
+    const reconnected = await repositoryPost(request('repository', { url }));
+    expect(reconnected.status).toBe(200);
+    expect(await (await repositoryGet(request('repository'))).json()).toEqual({
+      url,
+      branch: 'main',
+      hasToken: true,
+    });
+    expect(git(location, 'ls-tree', '-r', '--name-only', 'main')).not.toContain('config');
+  });
   it('keeps a saved URL and local edits when credentials or connectivity fail', async () => {
     await remote();
     await create();

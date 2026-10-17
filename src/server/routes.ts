@@ -23,7 +23,7 @@ import {
 import { fetchMetadata, optimizeImage } from './metadata';
 import { exportHtml } from './export';
 import { startSyncWorker, syncNow } from './sync-worker';
-import { repositoryUrl } from '../storage/repository';
+import { repositoryToken, repositoryUrl } from '../storage/repository';
 
 const operationSchema = z
   .object({
@@ -111,13 +111,14 @@ export const repositoryPost = handler(async (request) => {
       400,
       'Repository setup is available in local mode. Hosted repositories use server environment settings.',
     );
-  const { url } = z
-    .object({ url: z.string().max(2048) })
+  const { url, token } = z
+    .object({ url: z.string().max(2048), token: z.string().max(512).optional() })
     .strict()
-    .parse(await readJson(request, 4096));
+    .parse(await readJson(request, 8192));
   const validated = repositoryUrl(url);
+  const validatedToken = repositoryToken(token);
   try {
-    return snapshot(await syncNow(validated));
+    return snapshot(await syncNow(validated, validatedToken));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Connection failed.';
     throw new HttpError(

@@ -16,7 +16,7 @@ export function syncState(revision?: string) {
     syncError: s.error,
   };
 }
-export async function syncNow(repositoryUrl?: string) {
+export async function syncNow(repositoryUrl?: string, token?: string) {
   const s = state();
   if (s.running) throw new Error('Sync is already running; retry shortly.');
   s.running = true;
@@ -27,7 +27,7 @@ export async function syncNow(repositoryUrl?: string) {
     if (repositoryUrl !== undefined) {
       if (!(store instanceof LocalStore)) throw new Error('Repository setup requires local mode.');
       await store.initialize();
-      await store.connectRepository(repositoryUrl);
+      await store.connectRepository(repositoryUrl, token);
     }
     const result = await store.sync();
     s.status = result.status?.startsWith('Local only') ? 'idle' : 'synced';

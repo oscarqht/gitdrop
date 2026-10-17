@@ -19,9 +19,9 @@ Do not set a custom `NODE_ENV`: Next's dev/build/start commands select the corre
 
 ## Connect your private repository
 
-Create an empty private GitHub repository, then open **Connect repository** at the bottom of the webapp sidebar. Paste its SSH or HTTPS Git URL and choose **Save & sync**. Gitdrop initializes the local Git repository, commits your library, and publishes it. You can reopen **Repository settings** to view or update the URL.
+Create an empty private GitHub repository, then open **Connect repository** at the bottom of the webapp sidebar. Paste its SSH or HTTPS Git URL, optionally enter a GitHub personal access token (PAT) with Contents read/write access, and choose **Save & sync**. Gitdrop initializes the local Git repository, commits your library, and publishes it. You can reopen **Repository settings** to view or update the URL or replace the saved token.
 
-The URL is saved on the server in the data directory's `.git/config` as `origin`. Restarting the server or reopening the browser reuses it automatically. No repository initialization commands are needed. SSH keys or a Git credential helper must already grant the server access; use a URL without an embedded token or password. Connection errors leave local bookmarks safe and the configured URL available for retry.
+The URL and optional PAT are saved on the server in the data directory's `.git/config` and never committed to the library or returned to the browser. Restarting the server or reopening the browser reuses them automatically. No repository initialization commands are needed. You can either enter a GitHub PAT in the dialog or rely on SSH keys / a Git credential helper already configured on the server; always enter a URL without an embedded token or password. Connection errors leave local bookmarks safe and the configured URL and token available for retry.
 
 On another device, launch Gitdrop and enter the same URL. An existing Gitdrop library is fetched and merged with local bookmarks before publishing. Use an empty repository or one containing a Gitdrop library; an unrelated repository is rejected without overwriting it.
 
