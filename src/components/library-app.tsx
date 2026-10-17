@@ -227,7 +227,7 @@ export default function LibraryApp() {
     return (
       <main className="welcome">
         <div className="brand-mark">
-          <GitBranch size={30} />
+          <img src="/icon.png" alt="Gitdrop" width={60} height={60} />
         </div>
         <h1>Your corner of the internet.</h1>
         <p>A private home for everything worth keeping.</p>
