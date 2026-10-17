@@ -50,11 +50,15 @@ export default function LibraryApp() {
     () => Object.values(api.data?.library.records || {}) as Item[],
     [api.data],
   );
-  const collections = records
-    .filter((r) => r.kind === 'collection')
-    .sort(
-      (a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0) || a.id.localeCompare(b.id),
-    );
+  const collections = useMemo(
+    () =>
+      records
+        .filter((r) => r.kind === 'collection')
+        .sort(
+          (a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0) || a.id.localeCompare(b.id),
+        ),
+    [records],
+  );
   const inbox = collections.find((c) => c.title === 'Inbox');
   const current = collections.find((c) => c.id === view);
   const breadcrumb: Item[] = [];
@@ -68,50 +72,47 @@ export default function LibraryApp() {
     }
   }
   const item = records.find((r) => r.id === selected);
-  const descendants = new Set<string>();
-  function descend(id: string) {
-    if (descendants.has(id)) return;
-    descendants.add(id);
-    collections.filter((c) => c.parentId === id).forEach((c) => descend(c.id));
-  }
-  if (current) descend(current.id);
-  const bookmarks = records.filter((r) => r.kind === 'bookmark');
-  const filtered = bookmarks
-    .filter((r) => {
-      if (view === 'trash' || view === 'recovery') return false;
-      if ((!query || scoped) && view !== 'all') {
-        if (view === 'inbox' && r.parentId !== inbox?.id) return false;
-        if (current && !descendants.has(r.parentId || '')) return false;
-      }
-      const q = query.toLowerCase();
-      if (
-        q &&
-        ![r.title, ...(r.variants || []).flatMap((v) => [v.name, v.url]), r.description, r.note]
-          .join(' ')
-          .toLowerCase()
-          .includes(q)
-      )
-        return false;
-      const tags = tagQuery
-        .split(',')
-        .map((t) => t.trim().toLowerCase())
-        .filter(Boolean);
-      return (
-        !tags.length ||
-        (tagMode === 'all'
-          ? tags.every((t) => r.tags.some((rt) => rt.toLowerCase() === t))
-          : tags.some((t) => r.tags.some((rt) => rt.toLowerCase() === t)))
-      );
-    })
-    .sort((a, b) =>
-      sort === 'title'
-        ? a.title.localeCompare(b.title)
-        : sort === 'updated'
-          ? b.updatedAt.localeCompare(a.updatedAt)
-          : sort === 'added'
-            ? b.createdAt.localeCompare(a.createdAt)
-            : (a.order < b.order ? -1 : a.order > b.order ? 1 : 0) || a.id.localeCompare(b.id),
-    );
+  const bookmarks = useMemo(() => records.filter((r) => r.kind === 'bookmark'), [records]);
+  const filtered = useMemo(
+    () =>
+      bookmarks
+        .filter((r) => {
+          if (view === 'trash' || view === 'recovery') return false;
+          if ((!query || scoped) && view !== 'all') {
+            if (view === 'inbox' && r.parentId !== inbox?.id) return false;
+            if (current && r.parentId !== current.id) return false;
+          }
+          const q = query.toLowerCase();
+          if (
+            q &&
+            ![r.title, ...(r.variants || []).flatMap((v) => [v.name, v.url]), r.description, r.note]
+              .join(' ')
+              .toLowerCase()
+              .includes(q)
+          )
+            return false;
+          const tags = tagQuery
+            .split(',')
+            .map((t) => t.trim().toLowerCase())
+            .filter(Boolean);
+          return (
+            !tags.length ||
+            (tagMode === 'all'
+              ? tags.every((t) => r.tags.some((rt) => rt.toLowerCase() === t))
+              : tags.some((t) => r.tags.some((rt) => rt.toLowerCase() === t)))
+          );
+        })
+        .sort((a, b) =>
+          sort === 'title'
+            ? a.title.localeCompare(b.title)
+            : sort === 'updated'
+              ? b.updatedAt.localeCompare(a.updatedAt)
+              : sort === 'added'
+                ? b.createdAt.localeCompare(a.createdAt)
+                : (a.order < b.order ? -1 : a.order > b.order ? 1 : 0) || a.id.localeCompare(b.id),
+        ),
+    [bookmarks, view, query, scoped, inbox?.id, current, tagQuery, tagMode, sort],
+  );
   function navigate(id: string) {
     setView(id);
     setDrawer(false);
