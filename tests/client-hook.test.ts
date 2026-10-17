@@ -391,10 +391,17 @@ it('opens repository setup from sidebar or local status button and saves remote 
       return previous(url, init);
     }),
   );
-  render(createElement(LibraryApp));
+  const { container } = render(createElement(LibraryApp));
   await waitFor(() => expect(screen.getByText('Saved locally')).toBeTruthy());
   expect(screen.getByText('Connect repository')).toBeTruthy();
   fireEvent.click(screen.getByTitle('Connect repository to sync'));
+  const dialog = await screen.findByRole('dialog');
+  expect(dialog.closest('.sidebar')).toBeNull();
+  expect(dialog.parentElement?.parentElement).toBe(document.body);
+  expect(
+    container.querySelector('.bookmarks')!.compareDocumentPosition(dialog) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   const input = (await screen.findByLabelText(/Git repository URL/i)) as HTMLInputElement;
   const tokenInput = (await screen.findByLabelText(
     /GitHub personal access token/i,

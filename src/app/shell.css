@@ -70,6 +70,9 @@ a:focus-visible {
   top: 0;
   height: 100vh;
 }
+.sidebar:has(.modal-backdrop) {
+  z-index: 40;
+}
 .brand {
   display: flex;
   gap: 11px;
