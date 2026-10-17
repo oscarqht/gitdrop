@@ -566,9 +566,12 @@ it('renders bookmark cards as external links without arrows or footer and suppor
 
   fireEvent.click(copyBtn);
   expect(writeText).toHaveBeenCalledWith('https://example.com');
+  expect(copyBtn.classList.contains('copied')).toBe(true);
+  expect(copyBtn.getAttribute('title')).toBe('Copied!');
 
   fireEvent.click(editBtn);
   expect(await screen.findByText('Bookmark details')).toBeTruthy();
+  expect(editBtn.classList.contains('active')).toBe(true);
 
   const detailDeleteBtn = screen.getByLabelText('Move to trash');
   confirmSpy.mockReturnValueOnce(false);
