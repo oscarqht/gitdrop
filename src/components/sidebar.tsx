@@ -103,7 +103,7 @@ export function Sidebar({
     <aside className={`sidebar ${drawer ? 'open' : ''}`}>
       <div className="brand">
         <div className="brand-mark">
-          <GitBranch size={21} />
+          <img src="/icon.png" alt="Gitdrop" width={37} height={37} />
         </div>
         <strong>
           gitdrop<span>personal library</span>
