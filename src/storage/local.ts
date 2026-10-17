@@ -23,6 +23,8 @@ const exec = promisify(execFile);
 export class LocalStore implements Store {
   private scanner: FileScanner;
   private actor = `desktop-${process.pid}`;
+  private queue: Promise<unknown> = Promise.resolve();
+  private mediaIndex?: { revision: string; decoded: ReturnType<typeof decodeFiles> };
   constructor(
     public readonly directory: string,
     private readonly branch = 'main',
@@ -66,12 +68,16 @@ export class LocalStore implements Store {
     }
   }
   private async lock<T>(fn: () => Promise<T>): Promise<T> {
-    const release = await this.acquire();
-    try {
-      return await fn();
-    } finally {
-      await release();
-    }
+    const run = this.queue.then(async () => {
+      const release = await this.acquire();
+      try {
+        return await fn();
+      } finally {
+        await release();
+      }
+    });
+    this.queue = run.catch(() => {});
+    return run;
   }
   private scan() {
     return this.scanner.scan();
@@ -233,7 +239,10 @@ export class LocalStore implements Store {
   async readMedia(id: string) {
     return this.lock(async () => {
       const files = await this.scan();
-      const { library, paths } = decodeFiles(files);
+      const revision = this.digest(files);
+      if (this.mediaIndex?.revision !== revision)
+        this.mediaIndex = { revision, decoded: decodeFiles(files) };
+      const { library, paths } = this.mediaIndex.decoded;
       const item = library.records[id] ?? library.tombstones[id]?.record;
       const name = item?.cover.imageFile;
       if (!name) return null;

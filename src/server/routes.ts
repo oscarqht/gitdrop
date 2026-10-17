@@ -206,10 +206,7 @@ export const mediaGet = handler(async (request) => {
   return new Response(new Uint8Array(image), {
     headers: {
       'Content-Type': 'image/webp',
-      'Cache-Control':
-        hash && store instanceof GitHubStore
-          ? 'private, max-age=3600, immutable'
-          : 'private, no-cache',
+      'Cache-Control': 'private, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
     },
   });

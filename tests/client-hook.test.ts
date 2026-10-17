@@ -805,3 +805,27 @@ it('hides Import button on Trash and Recovery pages and clears Trash via Clear b
   expect(operations[0].recordId).toBeUndefined();
 });
 
+it('keeps cover image URLs stable across non-cover updates when imageHash is present', async () => {
+  const { Cover } = await import('../src/components/cover');
+  const hash = 'a'.repeat(40);
+  const item = makeItem('bookmark', {
+    id: 'bm-cover',
+    title: 'Cover Item',
+    url: 'https://cover.example.com',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    cover: { mode: 'image', imageFile: 'bm-cover.webp', imageHash: hash },
+  });
+  const { container, rerender } = render(createElement(Cover, { item }));
+  const img = container.querySelector('img') as HTMLImageElement;
+  expect(img.getAttribute('src')).toBe(`/api/media?recordId=bm-cover&v=${hash}&hash=${hash}`);
+
+  rerender(
+    createElement(Cover, {
+      item: { ...item, title: 'Renamed', updatedAt: '2026-02-01T00:00:00.000Z' },
+    }),
+  );
+  expect((container.querySelector('img') as HTMLImageElement).getAttribute('src')).toBe(
+    `/api/media?recordId=bm-cover&v=${hash}&hash=${hash}`,
+  );
+});
+
