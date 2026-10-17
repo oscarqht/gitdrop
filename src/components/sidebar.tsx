@@ -11,7 +11,7 @@ import {
   X,
   LogOut,
 } from 'lucide-react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import type { Item } from '../domain/types';
 import type { useLibrary } from '../client/use-library';
 import { RepositorySetup, type RepositoryInfo } from './repository-setup';
@@ -57,6 +57,13 @@ export function Sidebar({
   setOpenRepository,
   onRepositoryChange,
 }: Props) {
+  const bookmarkCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of bookmarks) {
+      if (b.parentId) counts.set(b.parentId, (counts.get(b.parentId) || 0) + 1);
+    }
+    return counts;
+  }, [bookmarks]);
   function tree(parent: string | null, depth = 0, seen = new Set<string>()): React.ReactNode {
     return collections
       .filter((c) => (c.parentId || null) === parent && !seen.has(c.id))
@@ -92,7 +99,7 @@ export function Sidebar({
             <button className="collection-link" onClick={() => navigate(c.id)}>
               <span>{c.cover.mode === 'emoji' ? c.cover.emoji : '▧'}</span>
               <span className="ellipsis">{c.title}</span>
-              <small>{bookmarks.filter((b) => b.parentId === c.id).length || ''}</small>
+              <small>{bookmarkCounts.get(c.id) || ''}</small>
             </button>
           </div>
           {!collapsed.has(c.id) && tree(c.id, depth + 1, new Set([...seen, c.id]))}

@@ -1,6 +1,6 @@
 'use client';
 import { ArrowUpRight } from 'lucide-react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { primaryVariant, type Item } from '../domain/types';
 import { Cover } from './cover';
 type Props = {
@@ -14,6 +14,13 @@ type Props = {
   move: (item: Item) => void;
   collections: Item[];
 };
+const GRID_ROW_HEIGHT = 336;
+const GRID_ROW_GAP = 21;
+const LIST_ROW_HEIGHT = 146;
+const LIST_ROW_GAP = 10;
+const DEFAULT_GRID_COLUMNS = 4;
+const OVERSCAN_ROWS = 2;
+
 export function BookmarkGrid({
   layout,
   filtered,
@@ -25,9 +32,115 @@ export function BookmarkGrid({
   move,
   collections,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 800,
+  );
+  const [columns, setColumns] = useState(DEFAULT_GRID_COLUMNS);
+  const [measuredHeight, setMeasuredHeight] = useState<{ grid?: number; list?: number }>({});
+
+  const collectionTitles = useMemo(
+    () => new Map(collections.map((c) => [c.id, c.title])),
+    [collections],
+  );
+
+  const updateMetrics = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const vh =
+      (typeof window !== 'undefined' && window.innerHeight) ||
+      (typeof document !== 'undefined' && document.documentElement?.clientHeight) ||
+      800;
+    const winScrollY =
+      (typeof window !== 'undefined' && (window.scrollY || window.pageYOffset)) ||
+      (typeof document !== 'undefined' && document.documentElement?.scrollTop) ||
+      0;
+    const rect = container.getBoundingClientRect();
+    const hasLayoutRect = rect.width > 0 || rect.height > 0 || rect.top !== 0 || rect.bottom !== 0;
+    const relativeScrollTop = hasLayoutRect ? -rect.top : winScrollY - (container.offsetTop || 0);
+    const nextScrollTop = Math.max(0, relativeScrollTop, container.scrollTop || 0);
+
+    setViewportHeight((prev) => (prev === vh ? prev : vh));
+    setScrollTop((prev) => (Math.abs(prev - nextScrollTop) < 1 ? prev : nextScrollTop));
+
+    if (layout === 'grid') {
+      let nextCols = DEFAULT_GRID_COLUMNS;
+      const computedCols =
+        typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+          ? window.getComputedStyle(container).gridTemplateColumns
+          : '';
+      if (computedCols && /^\d+(\.\d+)?px(\s+\d+(\.\d+)?px)*$/.test(computedCols.trim())) {
+        nextCols = computedCols.trim().split(/\s+/).length;
+      } else {
+        const width = container.clientWidth || rect.width;
+        if (width > 0) {
+          const winW = (typeof window !== 'undefined' && window.innerWidth) || width;
+          if (winW <= 360) nextCols = 1;
+          else if (winW <= 760) nextCols = 2;
+          else {
+            const minW = winW >= 1500 ? 260 : 230;
+            nextCols = Math.max(1, Math.floor((width + GRID_ROW_GAP) / (minW + GRID_ROW_GAP)));
+          }
+        }
+      }
+      setColumns((prev) => (prev === nextCols ? prev : nextCols));
+    }
+
+    const firstCard = container.querySelector<HTMLElement>('.bookmark');
+    if (firstCard) {
+      const cardHeight = Math.round(firstCard.getBoundingClientRect().height);
+      if (cardHeight > 40) {
+        setMeasuredHeight((prev) => {
+          const current = prev[layout];
+          if (current !== undefined && Math.abs(current - cardHeight) <= 2) return prev;
+          return { ...prev, [layout]: cardHeight };
+        });
+      }
+    }
+  }, [layout]);
+
+  useEffect(() => {
+    updateMetrics();
+    window.addEventListener('scroll', updateMetrics, { passive: true });
+    window.addEventListener('resize', updateMetrics);
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => updateMetrics()) : undefined;
+    if (observer && containerRef.current) observer.observe(containerRef.current);
+    return () => {
+      window.removeEventListener('scroll', updateMetrics);
+      window.removeEventListener('resize', updateMetrics);
+      observer?.disconnect();
+    };
+  }, [updateMetrics, filtered.length]);
+
+  const effectiveColumns = layout === 'list' ? 1 : Math.max(1, columns);
+  const rowGap = layout === 'list' ? LIST_ROW_GAP : GRID_ROW_GAP;
+  const rowHeight =
+    (layout === 'list' ? measuredHeight.list : measuredHeight.grid) ??
+    (layout === 'list' ? LIST_ROW_HEIGHT : GRID_ROW_HEIGHT);
+  const rowStride = rowHeight + rowGap;
+  const totalItems = filtered.length;
+  const totalRows = Math.ceil(totalItems / effectiveColumns);
+  const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / rowStride) + 1);
+  const maxFirstRow = Math.max(0, totalRows - visibleRowCount);
+  const firstVisibleRow = Math.min(maxFirstRow, Math.max(0, Math.floor(scrollTop / rowStride)));
+  const startRow = Math.max(0, firstVisibleRow - OVERSCAN_ROWS);
+  const endRow = Math.min(totalRows, firstVisibleRow + visibleRowCount + OVERSCAN_ROWS);
+  const startIndex = startRow * effectiveColumns;
+  const endIndex = Math.min(totalItems, endRow * effectiveColumns);
+  const visibleBookmarks = filtered.slice(startIndex, endIndex);
+  const paddingTop = startRow * rowStride;
+  const paddingBottom = Math.max(0, totalRows - endRow) * rowStride;
+
   return (
-    <div className={`bookmarks ${layout}`}>
-      {filtered.map((b) => (
+    <div
+      ref={containerRef}
+      className={`bookmarks ${layout}`}
+      onScroll={updateMetrics}
+      style={paddingTop || paddingBottom ? { paddingTop, paddingBottom } : undefined}
+    >
+      {visibleBookmarks.map((b) => (
         <article
           key={b.id}
           className={`bookmark ${selected === b.id ? 'selected' : ''}`}
@@ -62,7 +175,7 @@ export function BookmarkGrid({
             </div>
           </button>
           <footer>
-            <span>{collections.find((c) => c.id === b.parentId)?.title || 'Unfiled'}</span>
+            <span>{(b.parentId && collectionTitles.get(b.parentId)) || 'Unfiled'}</span>
             <a href={primaryVariant(b)?.url} target="_blank" rel="noreferrer" title="Open bookmark">
               <ArrowUpRight size={15} />
             </a>

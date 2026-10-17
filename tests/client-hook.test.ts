@@ -422,3 +422,115 @@ it('shows the full collections hierarchy in the breadcrumb', async () => {
   expect(breadcrumb?.querySelector('span')?.textContent).toBe('test');
   expect(breadcrumb?.querySelectorAll('svg')).toHaveLength(2);
 });
+
+it('renders only direct bookmarks for a selected collection while ignoring descendant bookmarks', async () => {
+  const parentCol = makeItem('collection', { id: 'col-foo', title: 'foo', order: 'a0' });
+  const childCol = makeItem('collection', {
+    id: 'col-test',
+    title: 'test',
+    parentId: parentCol.id,
+    order: 'a1',
+  });
+  const directBookmark = makeItem('bookmark', {
+    id: 'bm-direct',
+    title: 'Direct Bookmark',
+    url: 'https://direct.example.com',
+    parentId: parentCol.id,
+    order: 'a0',
+  });
+  const nestedBookmark = makeItem('bookmark', {
+    id: 'bm-nested',
+    title: 'Nested Google',
+    url: 'https://google.com',
+    parentId: childCol.id,
+    order: 'a1',
+  });
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: {
+      ...createLibrary(),
+      records: {
+        [parentCol.id]: parentCol,
+        [childCol.id]: childCol,
+        [directBookmark.id]: directBookmark,
+        [nestedBookmark.id]: nestedBookmark,
+      },
+    },
+  };
+  render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Direct Bookmark')).toBeTruthy());
+  expect(screen.getByText('Nested Google')).toBeTruthy();
+
+  const fooLink = screen
+    .getAllByRole('button')
+    .find((btn) => btn.classList.contains('collection-link') && btn.textContent?.includes('foo'))!;
+  fireEvent.click(fooLink);
+
+  await waitFor(() =>
+    expect(screen.getByText('1 bookmark · Your ideas, in good company.')).toBeTruthy(),
+  );
+  expect(screen.getByText('Direct Bookmark')).toBeTruthy();
+  expect(screen.queryByText('Nested Google')).toBeNull();
+
+  const testLink = screen
+    .getAllByRole('button')
+    .find((btn) => btn.classList.contains('collection-link') && btn.textContent?.includes('test'))!;
+  fireEvent.click(testLink);
+
+  await waitFor(() => expect(screen.getByText('Nested Google')).toBeTruthy());
+  expect(screen.queryByText('Direct Bookmark')).toBeNull();
+});
+
+it('virtualizes collection content rendering when there are many bookmarks', async () => {
+  const { orderBetween } = await import('../src/domain/order');
+  const col = makeItem('collection', { id: 'col-big', title: 'Big Collection', order: 'a0' });
+  const records: Record<string, ReturnType<typeof makeItem>> = { [col.id]: col };
+  let prevOrder: string | undefined;
+  for (let i = 0; i < 200; i++) {
+    prevOrder = orderBetween(prevOrder, undefined);
+    const bm = makeItem('bookmark', {
+      id: `bm-${String(i).padStart(3, '0')}`,
+      title: `Item ${i}`,
+      url: `https://example.com/${i}`,
+      parentId: col.id,
+      order: prevOrder,
+    });
+    records[bm.id] = bm;
+  }
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: { ...createLibrary(), records },
+  };
+
+  const { container } = render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Item 0')).toBeTruthy());
+
+  const colLink = screen
+    .getAllByRole('button')
+    .find(
+      (btn) =>
+        btn.classList.contains('collection-link') && btn.textContent?.includes('Big Collection'),
+    )!;
+  fireEvent.click(colLink);
+
+  await waitFor(() =>
+    expect(screen.getByText('200 bookmarks · Your ideas, in good company.')).toBeTruthy(),
+  );
+
+  const renderedCards = container.querySelectorAll('article.bookmark');
+  expect(renderedCards.length).toBeGreaterThan(0);
+  expect(renderedCards.length).toBeLessThan(40);
+  expect(screen.getByText('Item 0')).toBeTruthy();
+  expect(screen.queryByText('Item 199')).toBeNull();
+
+  const grid = container.querySelector('.bookmarks') as HTMLElement;
+  Object.defineProperty(grid, 'scrollTop', { configurable: true, writable: true, value: 10000 });
+  fireEvent.scroll(grid);
+
+  await waitFor(() => expect(screen.queryByText('Item 0')).toBeNull());
+  const midCards = container.querySelectorAll('article.bookmark');
+  expect(midCards.length).toBeGreaterThan(0);
+  expect(midCards.length).toBeLessThan(40);
+});
