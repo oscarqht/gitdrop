@@ -677,4 +677,67 @@ it('initializes view and bookmark details from initial URL path and responds to 
   expect(window.location.pathname).toBe('/trash');
 });
 
+it('opens import dialog when clicking Import and imports Raindrop CSV bookmarks into current collection', async () => {
+  const colWork = makeItem('collection', { id: 'col-work', title: 'Work' });
+  const colOther = makeItem('collection', { id: 'col-other', title: 'Other' });
+  const existing = makeItem('bookmark', {
+    id: 'bm-existing',
+    title: 'Existing Work Link',
+    url: 'https://work.example.com',
+    parentId: colWork.id,
+  });
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: {
+      ...createLibrary(),
+      records: {
+        [colWork.id]: colWork,
+        [colOther.id]: colOther,
+        [existing.id]: existing,
+      },
+    },
+  };
+
+  render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Existing Work Link')).toBeTruthy());
+
+  // Navigate to 'Work' collection
+  const workLink = screen
+    .getAllByRole('button')
+    .find((btn) => btn.classList.contains('collection-link') && btn.textContent?.includes('Work'))!;
+  fireEvent.click(workLink);
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Work');
+
+  // Click Import button
+  fireEvent.click(screen.getByRole('button', { name: /^Import$/i }));
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByText('Importing to Work')).toBeTruthy();
+
+  const csvContent = [
+    'id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite',
+    '1039405875,"The ""Wait, Not Like That"" Free Speech Panic",Important note,"In February, 2021, an article",https://www.techdirt.com/2025/04/17/free-speech/,Unsorted,"politics, media",2025-04-17T23:54:51.630Z,https://img.example.com/1.png,,false',
+    '1075498448,AI Is Polytheistic,,Emergent Gods,https://www.noemamag.com/ai-is-polytheistic/,SomeOtherFolder,ai,2025-05-06T03:06:16.597Z,,,true',
+  ].join('\n');
+
+  const csvFile = new File([csvContent], 'export.csv', { type: 'text/csv' });
+  const fileInput = screen.getByLabelText(/CSV file/i) as HTMLInputElement;
+  fireEvent.change(fileInput, { target: { files: [csvFile] } });
+
+  const submitBtn = screen.getByRole('button', { name: /Import bookmarks/i });
+  expect((submitBtn as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(submitBtn);
+
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(operations).toHaveLength(1);
+  expect(operations[0].type).toBe('create');
+  expect(operations[0].records).toHaveLength(2);
+  expect(operations[0].records?.every((r) => r.parentId === 'col-work')).toBe(true);
+
+  expect(await screen.findByText('The "Wait, Not Like That" Free Speech Panic')).toBeTruthy();
+  expect(screen.getByText('AI Is Polytheistic')).toBeTruthy();
+  expect(screen.getByText('3 bookmarks · Your ideas, in good company.')).toBeTruthy();
+});
+
+
 

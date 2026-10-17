@@ -1,5 +1,6 @@
 'use client';
 import { AddBookmark } from './add-bookmark';
+import { ImportBookmarks } from './import-bookmarks';
 import { Sidebar, builtins } from './sidebar';
 import { TrashView, RecoveryView } from './recovery-views';
 import { BookmarkGrid } from './bookmark-grid';
@@ -7,6 +8,7 @@ import { BookmarkGrid } from './bookmark-grid';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Plus,
+  Upload,
   Search,
   Inbox,
   ChevronRight,
@@ -24,6 +26,7 @@ import {
 } from 'lucide-react';
 import { type Item } from '../domain/types';
 import { orderBetween } from '../domain/order';
+import { parseRaindropCsv } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
@@ -41,6 +44,9 @@ export default function LibraryApp() {
   );
   const [drawer, setDrawer] = useState(false);
   const [add, setAdd] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
   const [openRepository, setOpenRepository] = useState(false);
   const [repository, setRepository] = useState<RepositoryInfo>();
   const [url, setUrl] = useState('');
@@ -218,6 +224,33 @@ export default function LibraryApp() {
       setAdding(false);
     }
   }
+  async function importCsv(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) return;
+    try {
+      setImporting(true);
+      const text = await readFileText(importFile);
+      const parentId = current?.id || inbox?.id || null;
+      const beforeOrder = bookmarks
+        .filter((b) => b.parentId === parentId)
+        .sort((a, b) => (a.order < b.order ? -1 : 1))[0]?.order;
+      const imported = parseRaindropCsv(text, {
+        parentId,
+        beforeOrder,
+        actor: actorId(),
+      });
+      await api.mutate({
+        type: 'create',
+        records: imported,
+      });
+      setImportOpen(false);
+      setImportFile(null);
+    } catch (e) {
+      api.setError((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  }
   function move(target: Item, asChild = false) {
     const source = records.find((r) => r.id === drag);
     setDrag(undefined);
@@ -360,6 +393,17 @@ export default function LibraryApp() {
                   <FolderPlus size={19} />
                 </button>
               )}
+              <button
+                className="secondary"
+                disabled={api.disabled}
+                onClick={() => {
+                  setImportFile(null);
+                  setImportOpen(true);
+                }}
+              >
+                <Upload size={16} />
+                <span>Import</span>
+              </button>
               <button className="primary" disabled={api.disabled} onClick={() => setAdd(true)}>
                 <Plus size={17} />
                 <span>Save bookmark</span>
@@ -549,8 +593,28 @@ export default function LibraryApp() {
           disabled={api.disabled}
         />
       )}
+      {importOpen && (
+        <ImportBookmarks
+          setImportOpen={setImportOpen}
+          importCsv={importCsv}
+          file={importFile}
+          setFile={setImportFile}
+          collectionTitle={current?.title}
+          importing={importing}
+          disabled={api.disabled}
+        />
+      )}
     </div>
   );
+}
+function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    reader.readAsText(file);
+  });
 }
 function orderBefore(next?: string) {
   return orderBetween(undefined, next);

@@ -138,6 +138,7 @@ export interface Operation {
   type: 'create' | 'update' | 'delete' | 'restore' | 'purge' | 'clearRecovery';
   recordId?: string;
   record?: Item;
+  records?: Item[];
   patch?: Partial<Item>;
   base?: Item;
   baseRecords?: Item[];

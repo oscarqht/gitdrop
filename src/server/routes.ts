@@ -32,6 +32,7 @@ const operationSchema = z
     type: z.enum(['create', 'update', 'delete', 'restore', 'purge', 'clearRecovery']),
     recordId: idSchema.optional(),
     record: itemSchema.optional(),
+    records: z.array(itemSchema).min(1).max(10000).optional(),
     base: itemSchema.optional(),
     baseRecords: z.array(itemSchema).max(50000).optional(),
     patch: z
