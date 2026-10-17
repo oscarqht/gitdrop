@@ -195,6 +195,7 @@ describe('application API', () => {
     expect(saved.status).toBe(200);
     const response = await mediaGet(request('media?recordId=book'));
     expect(response.headers.get('content-type')).toBe('image/webp');
+    expect(response.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
   it('rejects cross-site writes, path-shaped IDs, empty variants and malformed bodies', async () => {
@@ -260,7 +261,7 @@ describe('hosted conditional reads', () => {
       new Request(`https://library.example/api/media?recordId=book&hash=${head}`, { headers }),
     );
     expect(await media.text()).toBe('image');
-    expect(media.headers.get('cache-control')).toContain('private');
+    expect(media.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
     expect(store.readMediaByHash).toHaveBeenCalledWith(head);
     const invalid = await mediaGet(
       new Request('https://library.example/api/media?recordId=book&hash=bad', { headers }),

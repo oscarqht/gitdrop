@@ -12,7 +12,7 @@ export function Cover({ item, className = '' }: { item: Item; className?: string
         <span>{item.cover.emoji || '📁'}</span>
       ) : item.cover.mode !== 'none' && item.cover.imageFile ? (
         <img
-          src={`/api/media?recordId=${encodeURIComponent(item.id)}&v=${encodeURIComponent(item.updatedAt)}&hash=${encodeURIComponent(item.cover.imageHash || '')}`}
+          src={`/api/media?recordId=${encodeURIComponent(item.id)}&v=${encodeURIComponent(item.cover.imageHash || item.updatedAt)}&hash=${encodeURIComponent(item.cover.imageHash || '')}`}
           alt=""
           loading="lazy"
         />
