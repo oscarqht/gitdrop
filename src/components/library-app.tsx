@@ -27,6 +27,7 @@ import { orderBetween } from '../domain/order';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
+import type { RepositoryInfo } from './repository-setup';
 export default function LibraryApp() {
   const api = useLibrary();
   const [view, setView] = useState('all');
@@ -36,6 +37,8 @@ export default function LibraryApp() {
   const [selected, setSelected] = useState<string>();
   const [drawer, setDrawer] = useState(false);
   const [add, setAdd] = useState(false);
+  const [openRepository, setOpenRepository] = useState(false);
+  const [repository, setRepository] = useState<RepositoryInfo>();
   const [url, setUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
@@ -251,6 +254,9 @@ export default function LibraryApp() {
           setCollapsed,
           setDrag,
           move,
+          openRepository,
+          setOpenRepository,
+          onRepositoryChange: setRepository,
         }}
       />
       <main className="main">
@@ -268,8 +274,19 @@ export default function LibraryApp() {
           </div>
           <button
             className={`sync-status ${api.status.toLowerCase().replaceAll(' ', '-')}`}
-            onClick={() => api.action('/api/sync')}
-            title="Sync now"
+            onClick={() => {
+              if (api.data?.mode === 'local' && repository && !repository.url) {
+                api.setError('');
+                setOpenRepository(true);
+                return;
+              }
+              void api.action('/api/sync');
+            }}
+            title={
+              api.data?.mode === 'local' && repository && !repository.url
+                ? 'Connect repository to sync'
+                : 'Sync now'
+            }
           >
             {api.status === 'Synced' ? (
               <Check size={13} />
