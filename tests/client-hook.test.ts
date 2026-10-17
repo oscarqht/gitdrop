@@ -534,3 +534,61 @@ it('virtualizes collection content rendering when there are many bookmarks', asy
   expect(midCards.length).toBeGreaterThan(0);
   expect(midCards.length).toBeLessThan(40);
 });
+
+it('renders bookmark cards as external links without arrows or footer and supports hover actions and confirmed deletion', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  const confirmSpy = vi.spyOn(window, 'confirm');
+
+  const { container } = render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Original')).toBeTruthy());
+
+  const card = container.querySelector('article.bookmark')!;
+  expect(card).toBeTruthy();
+  expect(card.querySelector('footer')).toBeNull();
+  expect(card.querySelector('.domain svg')).toBeNull();
+
+  const mainLink = card.querySelector('a.bookmark-main') as HTMLAnchorElement;
+  expect(mainLink).toBeTruthy();
+  expect(mainLink.getAttribute('href')).toBe('https://example.com');
+  expect(mainLink.getAttribute('target')).toBe('_blank');
+  expect(mainLink.getAttribute('rel')).toContain('noreferrer');
+
+  const copyBtn = screen.getByTitle('Copy link');
+  const editBtn = screen.getByTitle('Edit');
+  const deleteBtn = screen.getByTitle('Delete');
+  expect(copyBtn).toBeTruthy();
+  expect(editBtn).toBeTruthy();
+  expect(deleteBtn).toBeTruthy();
+
+  fireEvent.click(copyBtn);
+  expect(writeText).toHaveBeenCalledWith('https://example.com');
+
+  fireEvent.click(editBtn);
+  expect(await screen.findByText('Bookmark details')).toBeTruthy();
+
+  const detailDeleteBtn = screen.getByLabelText('Move to trash');
+  confirmSpy.mockReturnValueOnce(false);
+  fireEvent.click(detailDeleteBtn);
+  expect(confirmSpy).toHaveBeenCalledTimes(1);
+  expect(operations).toHaveLength(0);
+  expect(screen.getByText('Bookmark details')).toBeTruthy();
+
+  confirmSpy.mockReturnValueOnce(false);
+  fireEvent.click(deleteBtn);
+  expect(confirmSpy).toHaveBeenCalledTimes(2);
+  expect(operations).toHaveLength(0);
+  expect(screen.getByText('Original')).toBeTruthy();
+
+  confirmSpy.mockReturnValueOnce(true);
+  fireEvent.click(deleteBtn);
+  expect(confirmSpy).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(operations).toHaveLength(1));
+  expect(operations[0].type).toBe('delete');
+  expect(screen.queryByText('Original')).toBeNull();
+  expect(screen.queryByText('Bookmark details')).toBeNull();
+});
+

@@ -1,6 +1,6 @@
 'use client';
-import { ArrowUpRight } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { Copy, Pencil, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { primaryVariant, type Item } from '../domain/types';
 import { Cover } from './cover';
 type Props = {
@@ -12,11 +12,12 @@ type Props = {
   disabled: boolean;
   setDrag: Dispatch<SetStateAction<string | undefined>>;
   move: (item: Item) => void;
-  collections: Item[];
+  collections?: Item[];
+  onDelete?: (item: Item) => void;
 };
-const GRID_ROW_HEIGHT = 336;
+const GRID_ROW_HEIGHT = 296;
 const GRID_ROW_GAP = 21;
-const LIST_ROW_HEIGHT = 146;
+const LIST_ROW_HEIGHT = 114;
 const LIST_ROW_GAP = 10;
 const DEFAULT_GRID_COLUMNS = 4;
 const OVERSCAN_ROWS = 2;
@@ -30,7 +31,7 @@ export function BookmarkGrid({
   disabled,
   setDrag,
   move,
-  collections,
+  onDelete,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -39,11 +40,6 @@ export function BookmarkGrid({
   );
   const [columns, setColumns] = useState(DEFAULT_GRID_COLUMNS);
   const [measuredHeight, setMeasuredHeight] = useState<{ grid?: number; list?: number }>({});
-
-  const collectionTitles = useMemo(
-    () => new Map(collections.map((c) => [c.id, c.title])),
-    [collections],
-  );
 
   const updateMetrics = useCallback(() => {
     const container = containerRef.current;
@@ -155,13 +151,58 @@ export function BookmarkGrid({
             if (sort === 'manual') move(b);
           }}
         >
-          <button className="bookmark-main" onClick={() => setSelected(b.id)}>
+          <div className="bookmark-actions">
+            <button
+              type="button"
+              className="icon-button"
+              title="Copy link"
+              aria-label="Copy link"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const url = primaryVariant(b)?.url;
+                if (url) void navigator.clipboard?.writeText(url);
+              }}
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              title="Edit"
+              aria-label="Edit"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelected(b.id);
+              }}
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-button danger"
+              title="Delete"
+              aria-label="Delete"
+              disabled={disabled}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (confirm('Move this bookmark to trash?')) onDelete?.(b);
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+          <a
+            className="bookmark-main"
+            href={primaryVariant(b)?.url}
+            target="_blank"
+            rel="noreferrer"
+          >
             <Cover item={b} />
             <div className="bookmark-info">
-              <div className="domain">
-                {hostname(primaryVariant(b)?.url)}
-                <ArrowUpRight size={12} />
-              </div>
+              <div className="domain">{hostname(primaryVariant(b)?.url)}</div>
               <h3>{b.title}</h3>
               {(b.variants?.length || 0) > 1 && (
                 <small className="variant-count">{b.variants?.length} links</small>
@@ -173,13 +214,7 @@ export function BookmarkGrid({
                 ))}
               </div>
             </div>
-          </button>
-          <footer>
-            <span>{(b.parentId && collectionTitles.get(b.parentId)) || 'Unfiled'}</span>
-            <a href={primaryVariant(b)?.url} target="_blank" rel="noreferrer" title="Open bookmark">
-              <ArrowUpRight size={15} />
-            </a>
-          </footer>
+          </a>
         </article>
       ))}
     </div>
