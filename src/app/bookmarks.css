@@ -130,9 +130,29 @@
   padding: 5px;
   border-radius: 5px;
   color: #4c5743;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease;
 }
 .bookmark-actions .icon-button:hover {
   background: #e8ece2;
+  color: #2f3829;
+}
+.bookmark-actions .icon-button:active:not(:disabled) {
+  transform: scale(0.9);
+}
+.bookmark-actions .icon-button.copied {
+  background: #e3f0da;
+  color: var(--green);
+}
+.bookmark-actions .icon-button.active {
+  background: #e3eadb;
+  color: var(--green);
+}
+.bookmark-actions .icon-button.danger:hover:not(:disabled) {
+  background: #fbebe4;
+  color: #9c3c2e !important;
 }
 .bookmark-main {
   text-align: left;

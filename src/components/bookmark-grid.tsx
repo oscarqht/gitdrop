@@ -1,5 +1,5 @@
 'use client';
-import { Copy, Pencil, Trash2 } from 'lucide-react';
+import { Check, Copy, Pencil, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { primaryVariant, type Item } from '../domain/types';
 import { Cover } from './cover';
@@ -40,6 +40,14 @@ export function BookmarkGrid({
   );
   const [columns, setColumns] = useState(DEFAULT_GRID_COLUMNS);
   const [measuredHeight, setMeasuredHeight] = useState<{ grid?: number; list?: number }>({});
+  const [copiedId, setCopiedId] = useState<string>();
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const updateMetrics = useCallback(() => {
     const container = containerRef.current;
@@ -154,21 +162,26 @@ export function BookmarkGrid({
           <div className="bookmark-actions">
             <button
               type="button"
-              className="icon-button"
-              title="Copy link"
+              className={`icon-button ${copiedId === b.id ? 'copied' : ''}`}
+              title={copiedId === b.id ? 'Copied!' : 'Copy link'}
               aria-label="Copy link"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 const url = primaryVariant(b)?.url;
                 if (url) void navigator.clipboard?.writeText(url);
+                setCopiedId(b.id);
+                if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+                copyTimerRef.current = setTimeout(() => {
+                  setCopiedId((prev) => (prev === b.id ? undefined : prev));
+                }, 1500);
               }}
             >
-              <Copy size={14} />
+              {copiedId === b.id ? <Check size={14} /> : <Copy size={14} />}
             </button>
             <button
               type="button"
-              className="icon-button"
+              className={`icon-button ${selected === b.id ? 'active' : ''}`}
               title="Edit"
               aria-label="Edit"
               onClick={(e) => {
