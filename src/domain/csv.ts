@@ -57,10 +57,15 @@ export interface RaindropImportOptions {
   actor?: string;
 }
 
-export function parseRaindropCsv(
+export interface RaindropImportEntry {
+  item: Item;
+  coverUrl?: string;
+}
+
+export function parseRaindropCsvWithCovers(
   text: string,
   options: RaindropImportOptions = {},
-): Item[] {
+): RaindropImportEntry[] {
   const rows = parseCsvRows(text);
   if (!rows.length) throw new Error('No bookmarks found in CSV file');
   if (!Object.hasOwn(rows[0], 'url')) throw new Error('CSV file must include a url column');
@@ -76,6 +81,7 @@ export function parseRaindropCsv(
     note: string;
     tags: string[];
     createdAt: string;
+    coverUrl?: string;
   }[] = [];
 
   for (const row of rows) {
@@ -93,7 +99,8 @@ export function parseRaindropCsv(
     const description = (row.excerpt ?? row.description ?? '').trim();
     const rawNote = (row.note ?? '').trim();
     const rawHighlights = (row.highlights ?? '').trim();
-    const note = rawNote && rawHighlights ? `${rawNote}\n\n${rawHighlights}` : rawNote || rawHighlights;
+    const note =
+      rawNote && rawHighlights ? `${rawNote}\n\n${rawHighlights}` : rawNote || rawHighlights;
     const tags = [
       ...new Set(
         (row.tags ?? '')
@@ -106,6 +113,17 @@ export function parseRaindropCsv(
     const parsedTime = rawCreated ? Date.parse(rawCreated) : Number.NaN;
     const createdAt = Number.isNaN(parsedTime) ? now : new Date(parsedTime).toISOString();
 
+    let coverUrl: string | undefined;
+    const rawCover = (row.cover ?? '').trim();
+    if (rawCover) {
+      try {
+        const parsedCover = new URL(rawCover.includes('://') ? rawCover : `https://${rawCover}`);
+        if (['http:', 'https:'].includes(parsedCover.protocol)) coverUrl = parsedCover.href;
+      } catch {
+        // Ignore invalid cover URLs
+      }
+    }
+
     validRows.push({
       url: parsedUrl.href,
       title,
@@ -113,6 +131,7 @@ export function parseRaindropCsv(
       note,
       tags,
       createdAt,
+      coverUrl,
     });
   }
 
@@ -121,8 +140,8 @@ export function parseRaindropCsv(
   const orders = ordersBetween(validRows.length, null, options.beforeOrder ?? null);
   const variantOrder = orderBetween();
 
-  return validRows.map((entry, index) =>
-    itemSchema.parse({
+  return validRows.map((entry, index) => ({
+    item: itemSchema.parse({
       id: crypto.randomUUID(),
       kind: 'bookmark',
       title: entry.title,
@@ -145,5 +164,10 @@ export function parseRaindropCsv(
       updatedAt: now,
       revision: { counter: 1, actor },
     }),
-  );
+    ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
+  }));
+}
+
+export function parseRaindropCsv(text: string, options: RaindropImportOptions = {}): Item[] {
+  return parseRaindropCsvWithCovers(text, options).map((entry) => entry.item);
 }

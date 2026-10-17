@@ -734,10 +734,74 @@ it('opens import dialog when clicking Import and imports Raindrop CSV bookmarks 
   expect(operations[0].records).toHaveLength(2);
   expect(operations[0].records?.every((r) => r.parentId === 'col-work')).toBe(true);
 
+  const [firstImported, secondImported] = operations[0].records!;
+  await waitFor(() => {
+    const metadataCalls = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([url]) => url === '/api/metadata')
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(metadataCalls).toEqual([
+      { recordId: firstImported.id, coverUrl: 'https://img.example.com/1.png' },
+      { recordId: secondImported.id },
+    ]);
+  });
+
   expect(await screen.findByText('The "Wait, Not Like That" Free Speech Panic')).toBeTruthy();
   expect(screen.getByText('AI Is Polytheistic')).toBeTruthy();
   expect(screen.getByText('3 bookmarks · Your ideas, in good company.')).toBeTruthy();
 });
 
+it('hides Import button on Trash and Recovery pages and clears Trash via Clear button', async () => {
+  const b1 = makeItem('bookmark', {
+    id: 'bm-1',
+    title: 'Trashed One',
+    url: 'https://one.example.com',
+  });
+  const b2 = makeItem('bookmark', {
+    id: 'bm-2',
+    title: 'Trashed Two',
+    url: 'https://two.example.com',
+  });
+  let lib = createLibrary();
+  lib = applyOperation(lib, { id: 'c1', actor: 'a', type: 'create', record: b1 });
+  lib = applyOperation(lib, { id: 'c2', actor: 'a', type: 'create', record: b2 });
+  lib = applyOperation(lib, { id: 'd1', actor: 'a', type: 'delete', recordId: b1.id });
+  lib = applyOperation(lib, { id: 'd2', actor: 'a', type: 'delete', recordId: b2.id });
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: lib,
+  };
 
+  vi.stubGlobal('confirm', vi.fn(() => true));
+
+  render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Import$/i })).toBeTruthy());
+  expect(screen.queryByRole('button', { name: /^Clear$/i })).toBeNull();
+
+  // Navigate to Recovery page
+  fireEvent.click(screen.getByRole('button', { name: /^Recovery$/i }));
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Recovery');
+  expect(screen.queryByRole('button', { name: /^Import$/i })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Clear$/i })).toBeNull();
+
+  // Navigate to Trash page
+  fireEvent.click(screen.getByRole('button', { name: /^Trash$/i }));
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Trash');
+  expect(screen.queryByRole('button', { name: /^Import$/i })).toBeNull();
+  expect(screen.getByText('Trashed One')).toBeTruthy();
+  expect(screen.getByText('Trashed Two')).toBeTruthy();
+
+  const clearBtn = screen.getByRole('button', { name: /^Clear$/i }) as HTMLButtonElement;
+  expect(clearBtn.disabled).toBe(false);
+  fireEvent.click(clearBtn);
+
+  await waitFor(() => expect(screen.getByText('Trash is empty')).toBeTruthy());
+  expect(screen.queryByText('Trashed One')).toBeNull();
+  expect(screen.queryByText('Trashed Two')).toBeNull();
+  expect(clearBtn.disabled).toBe(true);
+  expect(operations).toHaveLength(1);
+  expect(operations[0].type).toBe('purge');
+  expect(operations[0].recordId).toBeUndefined();
+});
 

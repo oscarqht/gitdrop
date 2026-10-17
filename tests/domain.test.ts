@@ -130,6 +130,19 @@ describe('collection trash and recovery',()=>{
     const stale=update(base,'bookmark',{title:'Offline'},'b'); const merged=mergeLibraries(base,purged,stale);
     expect(merged.records.bookmark).toBeUndefined(); expect(merged.tombstones.bookmark.record).toBeUndefined();
   });
+  it('purges all trashed items when recordId is omitted',()=>{
+    let base=fixture();
+    base=create(base,makeItem('bookmark',{id:'bookmark2',title:'Second',url:'https://two.example.com'}));
+    const del1=applyOperation(base,{id:'del1',actor:'a',type:'delete',recordId:'bookmark'});
+    const del2=applyOperation(del1,{id:'del2',actor:'a',type:'delete',recordId:'bookmark2'});
+    expect(del2.tombstones.bookmark.record).toBeDefined();
+    expect(del2.tombstones.bookmark2.record).toBeDefined();
+    const cleared=applyOperation(del2,{id:'purge-all',actor:'a',type:'purge'});
+    expect(cleared.tombstones.bookmark.record).toBeUndefined();
+    expect(cleared.tombstones.bookmark2.record).toBeUndefined();
+    expect(cleared.tombstones.bookmark.purgedRevision).toBeDefined();
+    expect(cleared.tombstones.bookmark2.purgedRevision).toBeDefined();
+  });
 });
 
 it('restores a trashed collection together with its unpurged descendants',()=>{

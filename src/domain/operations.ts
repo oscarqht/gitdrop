@@ -79,7 +79,7 @@ export function applyOperation(library: Library, operation: Operation): Library 
   const now = new Date().toISOString();
   const id = operation.recordId ?? operation.record?.id;
   if (id) idSchema.parse(id);
-  if (!id && !operation.records?.length && operation.type !== 'clearRecovery')
+  if (!id && !operation.records?.length && !['clearRecovery', 'purge'].includes(operation.type))
     throw new Error('Record ID required');
   if (operation.type === 'create') {
     const records = operation.records?.length
@@ -186,9 +186,11 @@ export function applyOperation(library: Library, operation: Operation): Library 
       next.records[key] = record;
     } // Keep tombstones to prevent older clients resurrecting stale edits.
   } else if (operation.type === 'purge') {
-    if (next.tombstones[id!]) {
-      delete next.tombstones[id!].record;
-      next.tombstones[id!].purgedRevision = revision;
+    for (const key of id ? [id] : Object.keys(next.tombstones)) {
+      if (next.tombstones[key]?.record) {
+        delete next.tombstones[key].record;
+        next.tombstones[key].purgedRevision = revision;
+      }
     }
   } else if (operation.type === 'clearRecovery') {
     next.clearedRecovery ??= {};

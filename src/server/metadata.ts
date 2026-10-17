@@ -16,6 +16,12 @@ export async function optimizeImage(buffer: Buffer) {
   }
   throw new HttpError(413, 'Unable to optimize this image below 200 KB.');
 }
+export async function fetchCover(imageUrl: string): Promise<Buffer> {
+  const result = await safeFetch(imageUrl, 8_000_000);
+  if (!result.type.startsWith('image/')) throw new Error('Cover URL did not return an image.');
+  return optimizeImage(result.body);
+}
+
 export async function fetchMetadata(url: string) {
   const page = await safeFetch(url);
   if (!/text\/html|application\/xhtml\+xml/i.test(page.type))
@@ -38,9 +44,7 @@ export async function fetchMetadata(url: string) {
   let warning: string | undefined;
   if (image) {
     try {
-      const result = await safeFetch(new URL(image, page.url).href, 8_000_000);
-      if (!result.type.startsWith('image/')) throw new Error('Cover URL did not return an image.');
-      cover = await optimizeImage(result.body);
+      cover = await fetchCover(new URL(image, page.url).href);
     } catch {
       warning = 'Title and description fetched; cover could not be downloaded.';
     }

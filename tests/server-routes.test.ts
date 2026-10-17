@@ -14,6 +14,9 @@ vi.mock('../src/storage', async (original) => ({
 }));
 vi.mock('../src/server/metadata', async (original) => ({
   ...(await original<any>()),
+  fetchCover: vi.fn(async () => {
+    throw new Error('No direct cover');
+  }),
   fetchMetadata: vi.fn(async () => ({
     title: 'Fetched title',
     description: 'Fetched description',
@@ -120,6 +123,59 @@ describe('application API', () => {
     result = await metadataPost(request('metadata', { recordId: 'book' }));
     item = (await result.json()).library.records.book;
     expect(item.title).toBe('My title');
+  });
+  it('fetches cover thumbnail for imported bookmark via coverUrl or falls back to page metadata', async () => {
+    const { fetchCover, fetchMetadata } = await import('../src/server/metadata');
+    const coverBytes = await sharp({
+      create: { width: 20, height: 20, channels: 3, background: 'blue' },
+    })
+      .webp()
+      .toBuffer();
+    vi.mocked(fetchCover).mockResolvedValueOnce(coverBytes);
+
+    const record = makeItem('bookmark', {
+      id: 'imported-bm',
+      title: 'Imported Title',
+      url: 'https://example.com/article',
+      parentId: 'inbox',
+    });
+    await operationPost(
+      request('operations', { id: 'import-op', actor: 'browser', type: 'create', records: [record] }),
+    );
+
+    const res = await metadataPost(
+      request('metadata', {
+        recordId: 'imported-bm',
+        coverUrl: 'https://up.raindrop.io/raindrop/thumbs/1.jpg',
+      }),
+    );
+    expect(res.status).toBe(200);
+    const updated = (await res.json()).library.records['imported-bm'];
+    expect(updated.title).toBe('Imported Title');
+    expect(updated.cover.mode).toBe('automatic');
+    expect(updated.cover.imageFile).toBeTruthy();
+    expect(fetchCover).toHaveBeenCalledWith('https://up.raindrop.io/raindrop/thumbs/1.jpg');
+
+    const mediaRes = await mediaGet(request('media?recordId=imported-bm'));
+    expect(mediaRes.status).toBe(200);
+    expect((await mediaRes.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+    // When fetchCover fails, falls back to fetchMetadata
+    vi.mocked(fetchCover).mockRejectedValueOnce(new Error('404'));
+    vi.mocked(fetchMetadata).mockResolvedValueOnce({
+      title: 'Page OG Title',
+      description: 'Page OG Description',
+      cover: coverBytes,
+      warning: undefined,
+    });
+    const fallbackRes = await metadataPost(
+      request('metadata', {
+        recordId: 'imported-bm',
+        coverUrl: 'https://up.raindrop.io/raindrop/thumbs/missing.jpg',
+      }),
+    );
+    expect(fallbackRes.status).toBe(200);
+    expect(fetchMetadata).toHaveBeenCalledWith('https://example.com/article');
   });
   it('accepts cover uploads and serves optimized bytes', async () => {
     await create();
