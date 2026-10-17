@@ -49,7 +49,7 @@
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    background: #26351e66;
+    background: var(--drawer-backdrop-bg);
     z-index: 29;
   }
   .topbar {
@@ -153,12 +153,12 @@
 
 .collection-hint {
   font-size: 8px;
-  color: #939d87;
+  color: var(--text-subtle);
   padding: 0 8px 10px;
 }
 .sync-status.sync-failed {
-  background: #fbebe4;
-  color: #a56d4c;
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 [hidden] {
