@@ -4,7 +4,7 @@ import { Sidebar, builtins } from './sidebar';
 import { TrashView, RecoveryView } from './recovery-views';
 import { BookmarkGrid } from './bookmark-grid';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   Plus,
   Search,
@@ -57,6 +57,16 @@ export default function LibraryApp() {
     );
   const inbox = collections.find((c) => c.title === 'Inbox');
   const current = collections.find((c) => c.id === view);
+  const breadcrumb: Item[] = [];
+  if (current) {
+    const seen = new Set<string>();
+    let node: Item | undefined = current;
+    while (node && !seen.has(node.id)) {
+      seen.add(node.id);
+      breadcrumb.unshift(node);
+      node = node.parentId ? collections.find((c) => c.id === node?.parentId) : undefined;
+    }
+  }
   const item = records.find((r) => r.id === selected);
   const descendants = new Set<string>();
   function descend(id: string) {
@@ -269,8 +279,16 @@ export default function LibraryApp() {
             <Menu size={20} />
           </button>
           <div className="breadcrumb">
-            My library <ChevronRight size={13} />
-            <span>{current?.title || builtins.find((b) => b.id === view)?.name}</span>
+            My library
+            {(breadcrumb.length
+              ? breadcrumb.map((c) => c.title)
+              : [builtins.find((b) => b.id === view)?.name]
+            ).map((label, i, items) => (
+              <Fragment key={i}>
+                <ChevronRight size={13} />
+                {i < items.length - 1 ? label : <span>{label}</span>}
+              </Fragment>
+            ))}
           </div>
           <button
             className={`sync-status ${api.status.toLowerCase().replaceAll(' ', '-')}`}
