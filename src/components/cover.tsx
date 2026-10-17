@@ -1,13 +1,72 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { EmojiStyle } from 'emoji-picker-react';
-import { useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Smile, ImagePlus, X } from 'lucide-react';
 import { primaryVariant, type Item } from '../domain/types';
 const Picker = dynamic(() => import('emoji-picker-react'), { ssr: false });
-export function Cover({ item, className = '' }: { item: Item; className?: string }) {
+
+export type CoverFit = 'cover' | 'contain';
+const COVER_FIT_KEY = 'gitdrop:coverFit';
+const coverFitListeners = new Set<() => void>();
+
+export function getCoverFit(): CoverFit {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(COVER_FIT_KEY) === 'contain' ? 'contain' : 'cover';
+    }
+  } catch {
+    /* Ignore storage access errors */
+  }
+  return 'cover';
+}
+
+export function setCoverFit(fit: CoverFit) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(COVER_FIT_KEY, fit);
+    }
+  } catch {
+    /* Ignore storage access errors */
+  }
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.coverFit = fit;
+    document.documentElement.style.setProperty('--cover-fit', fit);
+  }
+  for (const listener of coverFitListeners) listener();
+}
+
+export function useCoverFit(): [CoverFit, (fit: CoverFit) => void] {
+  const fit = useSyncExternalStore(
+    (listener) => {
+      coverFitListeners.add(listener);
+      return () => coverFitListeners.delete(listener);
+    },
+    getCoverFit,
+    () => 'cover' as CoverFit,
+  );
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.coverFit = fit;
+      document.documentElement.style.setProperty('--cover-fit', fit);
+    }
+  }, [fit]);
+  return [fit, setCoverFit];
+}
+
+export function Cover({
+  item,
+  className = '',
+  objectFit,
+}: {
+  item: Item;
+  className?: string;
+  objectFit?: CoverFit;
+}) {
+  const [storedFit] = useCoverFit();
+  const fit = objectFit ?? storedFit;
   return (
-    <div className={`cover ${className}`} data-mode={item.cover.mode}>
+    <div className={`cover ${className}`} data-mode={item.cover.mode} data-fit={fit}>
       {item.cover.mode === 'emoji' ? (
         <span>{item.cover.emoji || '📁'}</span>
       ) : item.cover.mode !== 'none' && item.cover.imageFile ? (
@@ -15,6 +74,7 @@ export function Cover({ item, className = '' }: { item: Item; className?: string
           src={`/api/media?recordId=${encodeURIComponent(item.id)}&v=${encodeURIComponent(item.cover.imageHash || item.updatedAt)}&hash=${encodeURIComponent(item.cover.imageHash || '')}`}
           alt=""
           loading="lazy"
+          style={{ objectFit: fit }}
         />
       ) : (
         <span className="cover-fallback">

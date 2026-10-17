@@ -134,8 +134,15 @@
   .record-row span {
     min-width: 60%;
   }
-  .modal {
+  .modal:not(.settings-dialog) {
     padding: 30px 23px;
+  }
+  .settings-sidebar {
+    width: 165px;
+    padding: 20px 10px;
+  }
+  .settings-panel {
+    padding: 22px 18px;
   }
 }
 @media (max-width: 360px) {

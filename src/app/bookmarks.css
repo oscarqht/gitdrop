@@ -184,7 +184,11 @@
 .cover img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: var(--cover-fit, cover);
+}
+.cover[data-fit='contain'] img,
+[data-cover-fit='contain'] .cover img {
+  object-fit: contain;
 }
 .bookmark-info {
   padding: 17px;
