@@ -52,6 +52,7 @@ if (!globalThis.localStorage) {
     Object.defineProperty(window, 'localStorage', { configurable: true, value: storage });
 }
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   memory.clear();
   localStorage.clear();
   online = true;
@@ -594,4 +595,86 @@ it('renders bookmark cards as external links without arrows or footer and suppor
   expect(screen.queryByText('Original')).toBeNull();
   expect(screen.queryByText('Bookmark details')).toBeNull();
 });
+
+it('syncs selected collection, bookmark editing, and special views with the URL path', async () => {
+  const col = makeItem('collection', { id: 'col-design', title: 'Design' });
+  const bm = makeItem('bookmark', {
+    id: 'bm-123',
+    title: 'Design System',
+    url: 'https://design.example.com',
+    parentId: col.id,
+  });
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: {
+      ...createLibrary(),
+      records: { [col.id]: col, [bm.id]: bm },
+    },
+  };
+
+  render(createElement(LibraryApp));
+  await waitFor(() => expect(screen.getByText('Design System')).toBeTruthy());
+  expect(window.location.pathname).toBe('/');
+
+  fireEvent.click(screen.getByRole('button', { name: /Inbox/i }));
+  expect(window.location.pathname).toBe('/inbox');
+
+  fireEvent.click(screen.getByRole('button', { name: /Trash/i }));
+  expect(window.location.pathname).toBe('/trash');
+
+  fireEvent.click(screen.getByRole('button', { name: /Recovery/i }));
+  expect(window.location.pathname).toBe('/recovery');
+
+  fireEvent.click(screen.getByRole('button', { name: /All bookmarks/i }));
+  expect(window.location.pathname).toBe('/');
+
+  const colLink = screen
+    .getAllByRole('button')
+    .find((btn) => btn.classList.contains('collection-link') && btn.textContent?.includes('Design'))!;
+  fireEvent.click(colLink);
+  expect(window.location.pathname).toBe('/collections/col-design');
+
+  fireEvent.click(screen.getByTitle('Edit'));
+  expect(await screen.findByText('Bookmark details')).toBeTruthy();
+  expect(window.location.pathname).toBe('/collections/col-design/bookmarks/bm-123');
+
+  fireEvent.click(screen.getByLabelText('Close details'));
+  expect(screen.queryByText('Bookmark details')).toBeNull();
+  expect(window.location.pathname).toBe('/collections/col-design');
+});
+
+it('initializes view and bookmark details from initial URL path and responds to popstate', async () => {
+  const col = makeItem('collection', { id: 'col-reading', title: 'Reading' });
+  const bm = makeItem('bookmark', {
+    id: 'bm-456',
+    title: 'Deep Reading',
+    url: 'https://reading.example.com',
+    parentId: col.id,
+  });
+  snapshot = {
+    mode: 'github',
+    revision: 'initial',
+    library: {
+      ...createLibrary(),
+      records: { [col.id]: col, [bm.id]: bm },
+    },
+  };
+
+  window.history.replaceState(null, '', '/collections/col-reading/bookmarks/bm-456');
+  render(createElement(LibraryApp));
+
+  expect(await screen.findByText('Bookmark details')).toBeTruthy();
+  expect(window.location.pathname).toBe('/collections/col-reading/bookmarks/bm-456');
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Reading');
+
+  act(() => {
+    window.history.pushState(null, '', '/trash');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  expect(screen.queryByText('Bookmark details')).toBeNull();
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Trash');
+  expect(window.location.pathname).toBe('/trash');
+});
+
 
