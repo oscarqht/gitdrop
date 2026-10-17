@@ -20,6 +20,7 @@ export async function nativeGit(
           env: {
             ...process.env,
             GIT_TERMINAL_PROMPT: '0',
+            GCM_INTERACTIVE: 'never',
           },
         },
         (e, out) => (e ? reject(new Error(`Git ${args[0]} failed`)) : resolve(out.trim())),
@@ -36,6 +37,7 @@ export async function nativeGit(
         env: {
           ...process.env,
           GIT_TERMINAL_PROMPT: '0',
+          GCM_INTERACTIVE: 'never',
         },
       })
     ).stdout.trim();
