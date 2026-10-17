@@ -51,14 +51,32 @@ it('accepts SSH and HTTPS repository URLs and rejects embedded credentials or Gi
     expect(() => repositoryUrl(url)).toThrow('Invalid repository URL');
 });
 
-it('validates optional GitHub personal access tokens and encodes auth headers', async () => {
-  const { repositoryToken, repositoryAuthHeader } = await import('../src/storage/repository');
+it('validates optional GitHub personal access tokens, encodes auth headers, and namespaces git credentials', async () => {
+  const {
+    parseCredentialPassword,
+    repositoryAuthHeader,
+    repositoryCredentialHost,
+    repositoryCredentialInput,
+    repositoryToken,
+  } = await import('../src/storage/repository');
   expect(repositoryToken()).toBeUndefined();
   expect(repositoryToken('   ')).toBeUndefined();
   expect(repositoryToken(' github_pat_12345_abc ')).toBe('github_pat_12345_abc');
   expect(repositoryAuthHeader('ghp_test123')).toBe(
     `Authorization: Basic ${Buffer.from('x-access-token:ghp_test123').toString('base64')}`,
   );
+  const hostA = repositoryCredentialHost('https://github.com/owner/repo-a.git');
+  const hostB = repositoryCredentialHost('https://github.com/owner/repo-b.git');
+  expect(hostA).toMatch(/^[0-9a-f]{16}\.gitdrop\.local$/);
+  expect(hostB).toMatch(/^[0-9a-f]{16}\.gitdrop\.local$/);
+  expect(hostA).not.toBe(hostB);
+  expect(
+    repositoryCredentialInput('https://github.com/owner/repo-a.git', 'ghp_test123'),
+  ).toBe(`protocol=https\nhost=${hostA}\nusername=gitdrop\npassword=ghp_test123\n\n`);
+  expect(
+    parseCredentialPassword(`protocol=https\nhost=${hostA}\nusername=gitdrop\npassword=ghp_test123\n`),
+  ).toBe('ghp_test123');
+  expect(parseCredentialPassword('protocol=https\nhost=github.com\n')).toBeUndefined();
   for (const bad of ['ghp_with space', 'ghp_with\nnewline', 'x'.repeat(513)]) {
     expect(() => repositoryToken(bad)).toThrow('Invalid GitHub personal access token');
   }

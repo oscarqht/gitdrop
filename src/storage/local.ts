@@ -1,5 +1,11 @@
 import { nativeGit, nativeGitFiles } from './git';
-import { repositoryAuthHeader, repositoryToken, repositoryUrl } from './repository';
+import {
+  parseCredentialPassword,
+  repositoryAuthHeader,
+  repositoryCredentialInput,
+  repositoryToken,
+  repositoryUrl,
+} from './repository';
 import fs from 'node:fs/promises';
 import { FileScanner } from './scanner';
 import { mediaHash, mediaReference, parseMediaReference } from './media';
@@ -298,8 +304,62 @@ export class LocalStore implements Store {
   private git(args: string[], input?: string) {
     return nativeGit(this.directory, args, input);
   }
+  private remoteGit(args: string[], authHeader?: string) {
+    return this.git(authHeader ? ['-c', `http.extraheader=${authHeader}`, ...args] : args);
+  }
   private gitFiles(ref: string) {
     return nativeGitFiles(this.directory, ref);
+  }
+  private async credentialArgs(action: 'fill' | 'approve' | 'reject'): Promise<string[]> {
+    const helper = await this.git(['config', '--get', 'credential.helper']).catch(() => '');
+    if (helper) return ['credential', action];
+    const file = path
+      .join(this.directory, '.git', 'gitdrop-credentials')
+      .split(path.sep)
+      .join('/');
+    return ['-c', `credential.helper=store --file=${file}`, 'credential', action];
+  }
+  private async saveToken(url: string, token: string): Promise<void> {
+    await this.git(['config', '--local', '--unset-all', 'gitdrop.token']).catch(() => {});
+    await this.git(['config', '--local', '--unset-all', 'http.extraheader']).catch(() => {});
+    const input = repositoryCredentialInput(url, token);
+    await this.git(await this.credentialArgs('approve'), input);
+    if (!(await this.readToken(url, true))) {
+      const file = path
+        .join(this.directory, '.git', 'gitdrop-credentials')
+        .split(path.sep)
+        .join('/');
+      await this.git(['config', '--local', '--replace-all', 'credential.helper', '']);
+      await this.git(['config', '--local', '--add', 'credential.helper', `store --file=${file}`]);
+      await this.git(['credential', 'approve'], input);
+    }
+    await fs
+      .chmod(path.join(this.directory, '.git', 'gitdrop-credentials'), 0o600)
+      .catch(() => {});
+    await this.git(['config', '--local', 'gitdrop.hasToken', 'true']);
+  }
+  private async readToken(url: string, force = false): Promise<string | undefined> {
+    if (!force) {
+      const legacy = await this.git(['config', '--local', '--get', 'gitdrop.token']).catch(
+        () => '',
+      );
+      if (legacy) {
+        const validated = repositoryToken(legacy);
+        if (validated) {
+          await this.saveToken(url, validated);
+          return validated;
+        }
+      }
+      const hasToken = await this.git(['config', '--local', '--get', 'gitdrop.hasToken']).catch(
+        () => '',
+      );
+      if (hasToken !== 'true') return undefined;
+    }
+    const output = await this.git(
+      await this.credentialArgs('fill'),
+      repositoryCredentialInput(url),
+    ).catch(() => '');
+    return parseCredentialPassword(output);
   }
   private async ensureGit() {
     // Do not accidentally use a parent checkout when the data directory is nested.
@@ -316,9 +376,7 @@ export class LocalStore implements Store {
       const url = exists
         ? await this.git(['config', '--local', '--get', 'remote.origin.url']).catch(() => null)
         : null;
-      const hasToken = exists
-        ? Boolean(await this.git(['config', '--local', '--get', 'gitdrop.token']).catch(() => ''))
-        : false;
+      const hasToken = exists && url ? Boolean(await this.readToken(url)) : false;
       return { url, branch: this.branch, ...(hasToken ? { hasToken: true } : {}) };
     });
   }
@@ -337,20 +395,17 @@ export class LocalStore implements Store {
         await this.git(['remote', 'add', 'origin', url]);
       }
       if (pat !== undefined) {
-        await this.git(['config', '--local', 'gitdrop.token', pat]);
+        await this.saveToken(url, pat);
       }
-      const savedToken =
-        pat ?? (await this.git(['config', '--local', '--get', 'gitdrop.token']).catch(() => ''));
+      const savedToken = pat ?? (await this.readToken(url));
+      await this.git(['config', '--local', '--unset-all', 'http.extraheader']).catch(() => {});
+      await this.git([
+        'config',
+        '--local',
+        '--unset-all',
+        'url.https://github.com/.insteadOf',
+      ]).catch(() => {});
       if (savedToken) {
-        await this.git([
-          'config',
-          '--local',
-          'http.extraheader',
-          repositoryAuthHeader(savedToken),
-        ]);
-        await this.git(['config', '--local', '--unset-all', 'url.https://github.com/.insteadOf']).catch(
-          () => {},
-        );
         if (url.startsWith('git@github.com:') || url.startsWith('ssh://git@github.com/')) {
           await this.git([
             'config',
@@ -366,9 +421,7 @@ export class LocalStore implements Store {
             'ssh://git@github.com/',
           ]);
         }
-        await fs.chmod(path.join(this.directory, '.git', 'config'), 0o600).catch(() => {});
       }
-      // .git/config is server-side and persists across application restarts.
       return { url, branch: this.branch, ...(savedToken ? { hasToken: true } : {}) };
     });
   }
@@ -401,17 +454,20 @@ export class LocalStore implements Store {
       const remotes = await this.git(['remote']);
       if (!remotes.split('\n').includes('origin'))
         return { ...(await this.load()), status: 'Local only — configure a Git origin to sync' };
+      const originUrl = await this.git(['config', '--local', '--get', 'remote.origin.url']).catch(
+        () => '',
+      );
+      const token = originUrl ? await this.readToken(originUrl) : undefined;
+      const authHeader = token ? repositoryAuthHeader(token) : undefined;
       try {
-        await this.git(['fetch', 'origin', this.branch]);
+        await this.remoteGit(['fetch', 'origin', this.branch], authHeader);
       } catch (error) {
-        const refs = await this.git([
-          'ls-remote',
-          '--heads',
-          'origin',
-          `refs/heads/${this.branch}`,
-        ]);
+        const refs = await this.remoteGit(
+          ['ls-remote', '--heads', 'origin', `refs/heads/${this.branch}`],
+          authHeader,
+        );
         if (refs) throw error;
-        await this.git(['push', 'origin', `HEAD:refs/heads/${this.branch}`]);
+        await this.remoteGit(['push', 'origin', `HEAD:refs/heads/${this.branch}`], authHeader);
         return { ...(await this.load()), status: 'Synced' };
       }
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -473,12 +529,12 @@ export class LocalStore implements Store {
           }
         }
         try {
-          await this.git(['push', 'origin', `HEAD:refs/heads/${this.branch}`]);
+          await this.remoteGit(['push', 'origin', `HEAD:refs/heads/${this.branch}`], authHeader);
           return { ...(await this.load()), status: 'Synced' };
         } catch {
           if (attempt === 2)
             throw new Error('Remote changed or push failed; local changes are safe. Retry sync.');
-          await this.git(['fetch', 'origin', this.branch]);
+          await this.remoteGit(['fetch', 'origin', this.branch], authHeader);
         }
       }
       return this.load();

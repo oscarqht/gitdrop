@@ -225,10 +225,15 @@ describe('web repository setup', () => {
     const location = path.join(directory, 'remote.git');
     await fs.mkdir(location);
     git(location, 'init', '--bare', '--initial-branch=main');
-    // Exercise real Git operations without contacting an external service.
-    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    const credentialFile = path.join(directory, '.git-credentials').split(path.sep).join('/');
+    // Exercise real Git operations and isolated credential storage without touching external services or OS keychains.
+    vi.stubEnv('GIT_CONFIG_COUNT', '3');
     vi.stubEnv('GIT_CONFIG_KEY_0', `url.file://${location}.insteadOf`);
     vi.stubEnv('GIT_CONFIG_VALUE_0', url);
+    vi.stubEnv('GIT_CONFIG_KEY_1', 'credential.helper');
+    vi.stubEnv('GIT_CONFIG_VALUE_1', '');
+    vi.stubEnv('GIT_CONFIG_KEY_2', 'credential.helper');
+    vi.stubEnv('GIT_CONFIG_VALUE_2', `store --file=${credentialFile}`);
     shared.store = new LocalStore(path.join(directory, 'library'));
     await shared.store.initialize();
     return location;
@@ -272,7 +277,7 @@ describe('web repository setup', () => {
       status: 'Synced',
     });
   });
-  it('saves and remembers a GitHub PAT on the server without exposing the raw token or committing it', async () => {
+  it('saves and remembers a GitHub PAT via git credential without storing secrets in .git/config or touching github.com credentials', async () => {
     const location = await remote();
     await create();
     const token = 'github_pat_secretToken123';
@@ -287,9 +292,16 @@ describe('web repository setup', () => {
       hasToken: true,
     });
     expect(JSON.stringify(info)).not.toContain(token);
-    expect(
-      git(path.join(directory, 'library'), 'config', '--local', '--get', 'http.extraheader'),
-    ).toBe(`Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`);
+    const gitConfig = await fs.readFile(
+      path.join(directory, 'library', '.git', 'config'),
+      'utf8',
+    );
+    expect(gitConfig).not.toContain(token);
+    expect(gitConfig).not.toContain('extraheader');
+    expect(gitConfig).not.toContain('gitdrop.token');
+    const savedCredentials = await fs.readFile(path.join(directory, '.git-credentials'), 'utf8');
+    expect(savedCredentials).toContain('.gitdrop.local');
+    expect(savedCredentials).not.toContain('github.com');
     // Subsequent updates without re-entering token preserve the remembered token
     const reconnected = await repositoryPost(request('repository', { url }));
     expect(reconnected.status).toBe(200);
