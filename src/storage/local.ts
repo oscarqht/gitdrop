@@ -419,52 +419,58 @@ export class LocalStore implements Store {
         const remote = await this.git(['rev-parse', `refs/remotes/origin/${this.branch}`]);
         if (local !== remote) {
           const base = await this.git(['merge-base', local, remote]).catch(() => null);
-          const [baseFiles, remoteFiles] = await Promise.all([
-            base ? this.gitFiles(base) : Promise.resolve(new Map() as Files),
-            this.gitFiles(remote),
-          ]);
-          if (!remoteFiles.has('.gitdrop/state.json'))
-            throw new Error('Remote must be empty or contain an existing Gitdrop library.');
-          files = await this.scan();
-          parsed = decodeFiles(files, this.actor);
-          const remoteParsed = decodeFiles(remoteFiles, 'external-remote');
-          const baseParsed = decodeFiles(baseFiles, 'external-base');
-          if (
-            [...parsed.diagnostics, ...remoteParsed.diagnostics, ...baseParsed.diagnostics].length
-          )
-            throw new Error('Invalid files block synchronization; repair diagnostics first');
-          const merged = mergeLibraries(baseParsed.library, parsed.library, remoteParsed.library);
-          const media = new Map([...remoteFiles, ...files]);
-          for (const [p, b] of [...remoteFiles, ...files])
-            if (p.endsWith('.webp')) media.set(`.gitdrop/media/by-hash/${mediaHash(b)}.webp`, b);
-          const next = encodeFiles(merged, media, { ...remoteParsed.paths, ...parsed.paths });
-          await this.write(next, files);
-          await this.git([
-            'add',
-            '--all',
-            '--',
-            '.',
-            ':(exclude).gitdrop-lock',
-            ':(exclude).gitdrop-transaction.json',
-            ':(exclude).gitdrop-stage',
-          ]);
-          const tree = await this.git(['write-tree']);
-          const commit = await this.git(
-            [
-              '-c',
-              'user.name=Gitdrop',
-              '-c',
-              'user.email=gitdrop@localhost',
-              'commit-tree',
-              tree,
-              '-p',
-              local,
-              '-p',
-              remote,
-            ],
-            'Merge bookmark changes\n',
-          );
-          await this.git(['update-ref', 'HEAD', commit, local]);
+          if (base !== remote) {
+            const [baseFiles, remoteFiles] = await Promise.all([
+              base ? this.gitFiles(base) : Promise.resolve(new Map() as Files),
+              this.gitFiles(remote),
+            ]);
+            if (!remoteFiles.has('.gitdrop/state.json'))
+              throw new Error('Remote must be empty or contain an existing Gitdrop library.');
+            files = await this.scan();
+            parsed = decodeFiles(files, this.actor);
+            const remoteParsed = decodeFiles(remoteFiles, 'external-remote');
+            const baseParsed = decodeFiles(baseFiles, 'external-base');
+            if (
+              [...parsed.diagnostics, ...remoteParsed.diagnostics, ...baseParsed.diagnostics].length
+            )
+              throw new Error('Invalid files block synchronization; repair diagnostics first');
+            const merged = mergeLibraries(
+              baseParsed.library,
+              parsed.library,
+              remoteParsed.library,
+            );
+            const media = new Map([...remoteFiles, ...files]);
+            for (const [p, b] of [...remoteFiles, ...files])
+              if (p.endsWith('.webp')) media.set(`.gitdrop/media/by-hash/${mediaHash(b)}.webp`, b);
+            const next = encodeFiles(merged, media, { ...remoteParsed.paths, ...parsed.paths });
+            await this.write(next, files);
+            await this.git([
+              'add',
+              '--all',
+              '--',
+              '.',
+              ':(exclude).gitdrop-lock',
+              ':(exclude).gitdrop-transaction.json',
+              ':(exclude).gitdrop-stage',
+            ]);
+            const tree = await this.git(['write-tree']);
+            const commit = await this.git(
+              [
+                '-c',
+                'user.name=Gitdrop',
+                '-c',
+                'user.email=gitdrop@localhost',
+                'commit-tree',
+                tree,
+                '-p',
+                local,
+                '-p',
+                remote,
+              ],
+              'Merge bookmark changes\n',
+            );
+            await this.git(['update-ref', 'HEAD', commit, local]);
+          }
         }
         try {
           await this.git(['push', 'origin', `HEAD:refs/heads/${this.branch}`]);

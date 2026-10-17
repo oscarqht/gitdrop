@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { mediaHash } from './media';
-import { idSchema, itemSchema, validateLibrary, type Item, type Library } from '../domain/types';
+import {
+  compareRevision,
+  idSchema,
+  itemSchema,
+  validateLibrary,
+  type Item,
+  type Library,
+} from '../domain/types';
 import { createLibrary } from '../domain/operations';
 
 export const gitBlobHash = (data: Buffer) =>
@@ -77,15 +84,34 @@ export function decodeFiles(files: Files, actor = 'external'): Decoded {
       'Missing Gitdrop control files; restore state and manifest from Git history before writing.',
     );
   const dirs = new Map<string, string>();
+  const staleFiles = new Set<string>();
   for (const [file, buffer] of candidates) {
     try {
       const item = JSON.parse(buffer.toString());
       itemSchema.parse(item);
-      if (library.records[item.id]) throw new Error(`Duplicate ID ${item.id}`);
       if (item.kind === 'collection' && path.posix.basename(file) !== '_collection.json')
         throw new Error('Collection metadata must be named _collection.json');
       if (item.kind === 'bookmark' && path.posix.basename(file) === '_collection.json')
         throw new Error('Expected collection metadata');
+      const existing = library.records[item.id];
+      if (existing) {
+        const existingFile = paths[item.id];
+        const cmp = compareRevision(item.revision, existing.revision);
+        const manifestPath = manifests[item.id]?.path;
+        const itemIsCanonical =
+          existing.kind === item.kind &&
+          (cmp > 0 || (cmp === 0 && manifestPath === file && manifestPath !== existingFile));
+        const existingIsCanonical =
+          existing.kind === item.kind &&
+          (cmp < 0 || (cmp === 0 && manifestPath === existingFile && manifestPath !== file));
+        if (existingIsCanonical) {
+          staleFiles.add(file);
+          continue;
+        }
+        if (!itemIsCanonical) throw new Error(`Duplicate ID ${item.id}`);
+        staleFiles.add(existingFile);
+        if (existing.kind === 'collection') dirs.delete(path.posix.dirname(existingFile));
+      }
       library.records[item.id] = item;
       paths[item.id] = file;
       if (item.kind === 'collection') dirs.set(path.posix.dirname(file), item.id);
@@ -96,7 +122,7 @@ export function decodeFiles(files: Files, actor = 'external'): Decoded {
   // Every ordinary folder with records is adopted as a collection, parent first.
   const needed = new Set<string>(files.directories || []);
   for (const [file] of files)
-    if (!file.startsWith('.') && safePath(file)) {
+    if (!staleFiles.has(file) && !file.startsWith('.') && safePath(file)) {
       let dir = path.posix.dirname(file);
       while (dir !== '.') {
         needed.add(dir);
@@ -236,8 +262,11 @@ export function encodeFiles(
   for (const [file, data] of [...previous])
     if (file.endsWith('.webp'))
       previous.set(`.gitdrop/media/by-hash/${mediaHash(data)}.webp`, data);
+  const sortedRecords = Object.values(library.records).sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
   const manifest: Record<string, { hash: string; path: string; record: Item }> = {};
-  for (const item of Object.values(library.records)) {
+  for (const item of sortedRecords) {
     const file = location(item);
     const copy = structuredClone(item);
     if (copy.cover.imageFile) {
@@ -268,23 +297,28 @@ export function encodeFiles(
     output.set(file, Buffer.from(JSON.stringify(copy, null, 2) + '\n'));
     manifest[item.id] = { hash: hash(copy), path: file, record: copy };
   }
+  const orderedPaths = Object.fromEntries(sortedRecords.map((item) => [item.id, paths[item.id]]));
   const { records, ...state } = library;
   output.set('.gitdrop/state.json', Buffer.from(JSON.stringify(state, null, 2) + '\n'));
   output.set('.gitdrop/manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n'));
   // Derived shards are disposable; source manifest is used to detect stale manual edits.
   const shards: Record<string, Item[]> = {};
-  for (const item of Object.values(records)) {
+  for (const item of sortedRecords) {
     const key = hash(item.id).slice(0, 2);
     (shards[key] ??= []).push(JSON.parse(output.get(paths[item.id])!.toString()));
   }
   for (const [key, items] of Object.entries(shards))
     output.set(`.gitdrop/index/${key}.json`, Buffer.from(JSON.stringify(items)));
   // Retain images needed by trash/recovery and unknown user files, but never obsolete record files.
-  const known = new Set(Object.values(existingPaths));
+  const known = new Set([
+    ...Object.values(existingPaths),
+    ...[...previous.keys()].filter((file) => !file.startsWith('.gitdrop/') && file.endsWith('.json')),
+  ]);
   const managedImages = new Set([...known].map((file) => file.replace(/\.json$/, '.webp')));
   for (const [file, data] of previous)
     if (
       !output.has(file) &&
+      !file.endsWith('.json') &&
       !known.has(file) &&
       !file.startsWith('.gitdrop/index/') &&
       !managedImages.has(file) &&
@@ -315,6 +349,7 @@ export function encodeFiles(
   const sourceHashes = Object.fromEntries(
     [...output]
       .filter(([p]) => p.endsWith('.json') && !p.startsWith('.gitdrop/index/'))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([p, b]) => [p, gitBlobHash(b)]),
   );
   output.set(
@@ -323,7 +358,7 @@ export function encodeFiles(
       JSON.stringify({
         sourceHashes,
         library: { ...library, records: {} },
-        paths,
+        paths: orderedPaths,
         shards: Object.keys(shards).map((key) => `.gitdrop/index/${key}.json`),
         shardHashes: Object.fromEntries(
           Object.keys(shards).map((key) => {
