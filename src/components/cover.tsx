@@ -1,14 +1,74 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { EmojiStyle } from 'emoji-picker-react';
+import { EmojiStyle, Theme } from 'emoji-picker-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Smile, ImagePlus, X } from 'lucide-react';
 import { primaryVariant, type Item } from '../domain/types';
 const Picker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 export type CoverFit = 'cover' | 'contain';
+export type SystemTheme = 'light' | 'dark';
 const COVER_FIT_KEY = 'gitdrop:coverFit';
+const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 const coverFitListeners = new Set<() => void>();
+
+export function getSystemTheme(): SystemTheme {
+  try {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia(DARK_MEDIA_QUERY).matches ? 'dark' : 'light';
+    }
+  } catch {
+    /* Ignore matchMedia errors */
+  }
+  return 'light';
+}
+
+export function applySystemTheme(theme: SystemTheme = getSystemTheme()): SystemTheme {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }
+  return theme;
+}
+
+function subscribeSystemTheme(listener: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return () => {};
+  }
+  let mql: MediaQueryList | undefined;
+  try {
+    mql = window.matchMedia(DARK_MEDIA_QUERY);
+  } catch {
+    return () => {};
+  }
+  if (!mql) return () => {};
+  const onChange = (event?: MediaQueryListEvent) => {
+    const isDark = typeof event?.matches === 'boolean' ? event.matches : mql.matches;
+    applySystemTheme(isDark ? 'dark' : 'light');
+    listener();
+  };
+  if (typeof mql.addEventListener === 'function') {
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }
+  if (typeof mql.addListener === 'function') {
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }
+  return () => {};
+}
+
+export function useSystemTheme(): SystemTheme {
+  const theme = useSyncExternalStore(
+    subscribeSystemTheme,
+    getSystemTheme,
+    () => 'light' as SystemTheme,
+  );
+  useEffect(() => {
+    applySystemTheme(theme);
+  }, [theme]);
+  return theme;
+}
 
 export function getCoverFit(): CoverFit {
   try {
@@ -96,6 +156,7 @@ export function CoverEditor({
   disabled?: boolean;
 }) {
   const [emoji, setEmoji] = useState(false);
+  const theme = useSystemTheme();
   return (
     <div className="cover-editor">
       <Cover item={item} />
@@ -136,6 +197,7 @@ export function CoverEditor({
         <div className="emoji-popover">
           <Picker
             emojiStyle={EmojiStyle.NATIVE}
+            theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT}
             onEmojiClick={(e) => {
               onChange({ ...item.cover, mode: 'emoji', emoji: e.emoji });
               setEmoji(false);

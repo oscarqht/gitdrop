@@ -5,10 +5,10 @@
   bottom: 0;
   width: 440px;
   max-width: 100%;
-  background: #fff;
+  background: var(--bg-elevated);
   z-index: 20;
   border-left: 1px solid var(--border);
-  box-shadow: -16px 0 60px #29351a15;
+  box-shadow: var(--detail-shadow);
   display: flex;
   flex-direction: column;
 }
@@ -32,7 +32,7 @@
   display: block;
   font-size: 11px;
   font-weight: 600;
-  color: #7a856d;
+  color: var(--text-muted);
   margin: 18px 0 7px;
 }
 .detail input:not([type='radio']),
@@ -44,8 +44,8 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px;
-  background: #fdfefb;
-  color: #4c5743;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
   margin-top: 7px;
   font-weight: 400;
   font-size: 12px;
@@ -104,7 +104,7 @@
 .note-heading button,
 .variant-order button {
   font-size: 10px;
-  color: #6a8557;
+  color: var(--green-accent);
 }
 .variant {
   border: 1px solid var(--border);
@@ -132,10 +132,10 @@
   min-width: 0;
 }
 .danger {
-  color: #b57965 !important;
+  color: var(--danger-text) !important;
 }
 .muted {
-  color: #a1a997;
+  color: var(--text-subtle);
   font-weight: 400;
 }
 .markdown {
@@ -145,7 +145,7 @@
 }
 .markdown a {
   text-decoration: underline;
-  color: #61864a;
+  color: var(--green-accent);
 }
 .markdown pre {
   overflow: auto;
@@ -154,7 +154,7 @@
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: #28352055;
+  background: var(--backdrop-bg);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -162,27 +162,27 @@
   padding: 20px;
 }
 .modal {
-  background: white;
+  background: var(--bg-elevated);
   width: 440px;
   max-width: 100%;
   border-radius: 16px;
   padding: 35px;
   position: relative;
-  box-shadow: 0 25px 90px #18241230;
+  box-shadow: var(--modal-shadow);
 }
 .modal h2,
 .modal > p {
   text-align: center;
 }
 .modal > p {
-  color: #909b84;
+  color: var(--muted);
   font-size: 12px;
 }
 .modal-close {
   position: absolute;
   top: 13px;
   right: 13px;
-  color: #939d87;
+  color: var(--text-subtle);
 }
 .modal-footer {
   display: flex;
@@ -190,23 +190,23 @@
   justify-content: space-between;
   margin-top: 23px;
   font-size: 10px;
-  color: #939b89;
+  color: var(--text-subtle);
 }
 .repository-dialog {
   border: 0;
   color: inherit;
 }
 .repository-dialog::backdrop {
-  background: #28352055;
+  background: var(--backdrop-bg);
   backdrop-filter: blur(4px);
 }
 .repository-dialog p {
   font-size: 12px;
   line-height: 1.6;
-  color: #69765c;
+  color: var(--text-muted);
 }
 .repository-dialog .repository-error {
-  color: #9c3c2e;
+  color: var(--danger-strong);
   overflow-wrap: anywhere;
 }
 .repository-dialog .repository-help {
@@ -227,7 +227,7 @@
 .settings-sidebar {
   width: 215px;
   flex-shrink: 0;
-  background: #f5f7f2;
+  background: var(--settings-sidebar-bg);
   border-right: 1px solid var(--border);
   padding: 24px 12px;
   display: flex;
@@ -240,7 +240,7 @@
   font-weight: 700;
   margin: 0;
   padding: 0 10px;
-  color: #2f3829;
+  color: var(--text-strong);
 }
 .settings-tabs {
   display: flex;
@@ -256,15 +256,15 @@
   border-radius: 7px;
   font-size: 12px;
   font-weight: 500;
-  color: #6b7660;
+  color: var(--text-muted);
   text-align: left;
 }
 .settings-tab:hover {
-  background: #ebf0e4;
-  color: #3f4b37;
+  background: var(--surface-hover);
+  color: var(--text);
 }
 .settings-tab.active {
-  background: #e2ead7;
+  background: var(--surface-active);
   color: var(--green);
   font-weight: 600;
 }
@@ -278,7 +278,7 @@
   font-size: 16px;
   font-weight: 700;
   margin: 0 0 8px;
-  color: #2f3829;
+  color: var(--text-strong);
 }
 .modal label.settings-option {
   display: flex;
@@ -289,7 +289,7 @@
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: #fafbf8;
+  background: var(--bg);
   cursor: pointer;
 }
 .settings-option-text {
@@ -302,12 +302,12 @@
 .settings-option-label {
   font-size: 12px;
   font-weight: 600;
-  color: #3b4634;
+  color: var(--text);
 }
 .settings-option-desc {
   font-size: 11px;
   font-weight: 400;
-  color: #7a856d;
+  color: var(--text-muted);
   line-height: 1.5;
 }
 .settings-switch-control {
@@ -320,7 +320,7 @@
 .settings-switch-mode {
   font-size: 11px;
   font-weight: 500;
-  color: #939d87;
+  color: var(--text-subtle);
 }
 .settings-switch-mode.active {
   color: var(--green);
@@ -339,7 +339,7 @@
   width: 38px;
   height: 22px;
   border-radius: 999px;
-  background: #cfd7c6;
+  background: var(--switch-track-bg);
   transition: background-color 0.15s ease;
   display: inline-block;
 }
@@ -350,7 +350,7 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--switch-thumb-bg);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.15s ease;
 }
@@ -400,7 +400,7 @@
   height: 60px;
 }
 .welcome p {
-  color: #939b89;
+  color: var(--text-subtle);
 }
 .welcome .primary {
   margin-top: 20px;

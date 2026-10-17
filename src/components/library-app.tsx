@@ -31,11 +31,12 @@ import { parseRaindropCsvWithCovers } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
-import { useCoverFit } from './cover';
+import { useCoverFit, useSystemTheme } from './cover';
 import type { RepositoryInfo } from './repository-setup';
 export default function LibraryApp() {
   const api = useLibrary();
   const [coverFit] = useCoverFit();
+  const theme = useSystemTheme();
   const [view, setView] = useState(
     () => parseUrlPath(typeof window !== 'undefined' ? window.location.pathname : '/').view,
   );
@@ -310,7 +311,7 @@ export default function LibraryApp() {
   }
   if (api.login)
     return (
-      <main className="welcome">
+      <main className="welcome" data-theme={theme}>
         <div className="brand-mark">
           <img src="/icon.png" alt="Gitdrop" width={60} height={60} />
         </div>
@@ -322,7 +323,7 @@ export default function LibraryApp() {
       </main>
     );
   return (
-    <div className="app-shell" data-cover-fit={coverFit}>
+    <div className="app-shell" data-cover-fit={coverFit} data-theme={theme}>
       {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
       <Sidebar
         {...{

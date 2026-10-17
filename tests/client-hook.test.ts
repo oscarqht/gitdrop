@@ -932,4 +932,84 @@ it('renders Settings dialog with vertical tabs and toggles bookmark and collecti
   expect(collectionCoverImg.style.objectFit).toBe('cover');
 });
 
+it('automatically follows the OS light/dark theme and provides no manual theme switch control', async () => {
+  snapshot.mode = 'local';
+  const previous = globalThis.fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/repository' && (!init?.method || init.method === 'GET')) {
+        return response({ url: null, branch: 'main' });
+      }
+      return previous(url, init);
+    }),
+  );
+
+  let isDark = false;
+  const listeners = new Set<() => void>();
+  const mql = {
+    get matches() {
+      return isDark;
+    },
+    media: '(prefers-color-scheme: dark)',
+    onchange: null,
+    addEventListener: vi.fn((type: string, cb: () => void) => {
+      if (type === 'change') listeners.add(cb);
+    }),
+    removeEventListener: vi.fn((type: string, cb: () => void) => {
+      if (type === 'change') listeners.delete(cb);
+    }),
+    addListener: vi.fn((cb: () => void) => {
+      listeners.add(cb);
+    }),
+    removeListener: vi.fn((cb: () => void) => {
+      listeners.delete(cb);
+    }),
+    dispatchEvent: vi.fn(),
+  };
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => (query === '(prefers-color-scheme: dark)' ? mql : { ...mql, matches: false })),
+  );
+
+  const { container } = render(createElement(LibraryApp));
+  expect(await screen.findByText('Original')).toBeTruthy();
+
+  // Defaults to light theme when OS prefers light
+  const appShell = container.querySelector('.app-shell')!;
+  expect(appShell.getAttribute('data-theme')).toBe('light');
+  expect(document.documentElement.dataset.theme).toBe('light');
+  expect(document.documentElement.style.colorScheme).toBe('light');
+
+  // Auto-switches to dark theme when OS theme changes to dark
+  act(() => {
+    isDark = true;
+    listeners.forEach((cb) => cb());
+  });
+  expect(appShell.getAttribute('data-theme')).toBe('dark');
+  expect(document.documentElement.dataset.theme).toBe('dark');
+  expect(document.documentElement.style.colorScheme).toBe('dark');
+
+  // Auto-switches back to light theme when OS theme changes to light
+  act(() => {
+    isDark = false;
+    listeners.forEach((cb) => cb());
+  });
+  expect(appShell.getAttribute('data-theme')).toBe('light');
+  expect(document.documentElement.dataset.theme).toBe('light');
+  expect(document.documentElement.style.colorScheme).toBe('light');
+
+  // Verify there is no manual theme switch control in Settings -> Appearance or anywhere in the UI
+  fireEvent.click(screen.getByText('Connect repository'));
+  const appearanceTab = await screen.findByRole('tab', { name: /Appearance/i });
+  fireEvent.click(appearanceTab);
+
+  const switches = screen.getAllByRole('switch');
+  expect(switches).toHaveLength(1); // Only the existing "Scale cover image to fit" switch
+  expect(screen.queryByLabelText(/theme|dark mode|light mode|color scheme/i)).toBeNull();
+  expect(screen.queryByRole('button', { name: /theme|dark mode|light mode/i })).toBeNull();
+});
+
+
+
 
