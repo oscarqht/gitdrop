@@ -22,11 +22,12 @@ import {
   Check,
   CloudOff,
   GitBranch,
+  Trash2,
   X,
 } from 'lucide-react';
 import { type Item } from '../domain/types';
 import { orderBetween } from '../domain/order';
-import { parseRaindropCsv } from '../domain/csv';
+import { parseRaindropCsvWithCovers } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
@@ -58,6 +59,13 @@ export default function LibraryApp() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const records = useMemo(
     () => Object.values(api.data?.library.records || {}) as Item[],
+    [api.data],
+  );
+  const trashCount = useMemo(
+    () =>
+      (Object.values(api.data?.library.tombstones || {}) as any[]).filter(
+        (t) => t.record && !api.data?.library.records[t.id],
+      ).length,
     [api.data],
   );
   const collections = useMemo(
@@ -234,17 +242,28 @@ export default function LibraryApp() {
       const beforeOrder = bookmarks
         .filter((b) => b.parentId === parentId)
         .sort((a, b) => (a.order < b.order ? -1 : 1))[0]?.order;
-      const imported = parseRaindropCsv(text, {
+      const entries = parseRaindropCsvWithCovers(text, {
         parentId,
         beforeOrder,
         actor: actorId(),
       });
       await api.mutate({
         type: 'create',
-        records: imported,
+        records: entries.map((entry) => entry.item),
       });
       setImportOpen(false);
       setImportFile(null);
+      void (async () => {
+        for (const entry of entries) {
+          await api.action(
+            '/api/metadata',
+            JSON.stringify({
+              recordId: entry.item.id,
+              ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
+            }),
+          );
+        }
+      })();
     } catch (e) {
       api.setError((e as Error).message);
     } finally {
@@ -393,17 +412,37 @@ export default function LibraryApp() {
                   <FolderPlus size={19} />
                 </button>
               )}
-              <button
-                className="secondary"
-                disabled={api.disabled}
-                onClick={() => {
-                  setImportFile(null);
-                  setImportOpen(true);
-                }}
-              >
-                <Upload size={16} />
-                <span>Import</span>
-              </button>
+              {view === 'trash' && (
+                <button
+                  className="secondary danger"
+                  disabled={api.disabled || !trashCount}
+                  onClick={() => {
+                    if (
+                      confirm(
+                        'Permanently remove all items in Trash from the current library? Git history may retain them.',
+                      )
+                    ) {
+                      void api.mutate({ type: 'purge' });
+                    }
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>Clear</span>
+                </button>
+              )}
+              {view !== 'trash' && view !== 'recovery' && (
+                <button
+                  className="secondary"
+                  disabled={api.disabled}
+                  onClick={() => {
+                    setImportFile(null);
+                    setImportOpen(true);
+                  }}
+                >
+                  <Upload size={16} />
+                  <span>Import</span>
+                </button>
+              )}
               <button className="primary" disabled={api.disabled} onClick={() => setAdd(true)}>
                 <Plus size={17} />
                 <span>Save bookmark</span>

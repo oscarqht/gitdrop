@@ -20,7 +20,7 @@ import {
   sessionCookie,
   sessionScope,
 } from './auth';
-import { fetchMetadata, optimizeImage } from './metadata';
+import { fetchCover, fetchMetadata, optimizeImage } from './metadata';
 import { exportHtml } from './export';
 import { startSyncWorker, syncNow } from './sync-worker';
 import { repositoryToken, repositoryUrl } from '../storage/repository';
@@ -129,7 +129,9 @@ export const repositoryPost = handler(async (request) => {
   }
 }, true);
 export const metadataPost = handler(async (request) => {
-  const { recordId } = z.object({ recordId: idSchema }).parse(await readJson(request));
+  const { recordId, coverUrl } = z
+    .object({ recordId: idSchema, coverUrl: z.string().max(10000).optional() })
+    .parse(await readJson(request));
   const store = await getStore();
   const initial = await store.read();
   const original = initial.library.records[recordId];
@@ -137,7 +139,17 @@ export const metadataPost = handler(async (request) => {
   const variant =
     original.variants?.find((v) => v.id === original.defaultVariantId) || original.variants?.[0];
   if (!variant) throw new HttpError(400, 'Bookmark requires a URL variant.');
-  const result = await fetchMetadata(variant.url);
+  let directCover: Buffer | undefined;
+  if (coverUrl) {
+    try {
+      directCover = await fetchCover(coverUrl);
+    } catch {
+      /* fall back to page metadata */
+    }
+  }
+  const result = directCover
+    ? { title: '', description: '', cover: directCover, warning: undefined }
+    : await fetchMetadata(variant.url);
   const current = await store.read();
   const item = current.library.records[recordId];
   if (!item) throw new HttpError(409, 'Bookmark was deleted while fetching metadata.');
