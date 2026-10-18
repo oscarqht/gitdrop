@@ -57,7 +57,7 @@ export function ImportBookmarks({
           <Upload size={25} />
         </div>
         <h2 id="import-bookmarks-title">Import bookmarks</h2>
-        <p>Choose a local Raindrop CSV file to import into this collection.</p>
+        <p>Choose a local Raindrop CSV file to import. Collections structure will be preserved and created if needed.</p>
         <label>
           CSV file
           <input

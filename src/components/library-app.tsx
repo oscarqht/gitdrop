@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { type Item } from '../domain/types';
 import { orderBetween } from '../domain/order';
-import { parseRaindropCsvWithCovers } from '../domain/csv';
+import { parseRaindropCsvWithCovers, runConcurrent } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
@@ -249,6 +249,7 @@ export default function LibraryApp() {
         parentId,
         beforeOrder,
         actor: actorId(),
+        existingCollections: collections,
       });
       await api.mutate({
         type: 'create',
@@ -257,7 +258,8 @@ export default function LibraryApp() {
       setImportOpen(false);
       setImportFile(null);
       void (async () => {
-        for (const entry of entries) {
+        const bookmarkEntries = entries.filter((entry) => entry.item.kind === 'bookmark');
+        await runConcurrent(bookmarkEntries, 6, async (entry) => {
           await api.action(
             '/api/metadata',
             JSON.stringify({
@@ -265,7 +267,8 @@ export default function LibraryApp() {
               ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
             }),
           );
-        }
+        });
+        await api.refresh();
       })();
     } catch (e) {
       api.setError((e as Error).message);

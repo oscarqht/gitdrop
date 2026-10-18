@@ -738,24 +738,31 @@ it('opens import dialog when clicking Import and imports Raindrop CSV bookmarks 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(operations).toHaveLength(1);
   expect(operations[0].type).toBe('create');
-  expect(operations[0].records).toHaveLength(2);
-  expect(operations[0].records?.every((r) => r.parentId === 'col-work')).toBe(true);
+  expect(operations[0].records).toHaveLength(3);
+  const createdCol = operations[0].records!.find((r) => r.kind === 'collection');
+  expect(createdCol?.title).toBe('SomeOtherFolder');
 
-  const [firstImported, secondImported] = operations[0].records!;
+  const [firstImported, secondImported] = operations[0].records!.filter((r) => r.kind === 'bookmark');
+  expect(firstImported.parentId).toBe('col-work');
+  expect(secondImported.parentId).toBe(createdCol!.id);
+
   await waitFor(() => {
     const metadataCalls = vi
       .mocked(globalThis.fetch)
       .mock.calls.filter(([url]) => url === '/api/metadata')
       .map(([, init]) => JSON.parse(String(init?.body)));
-    expect(metadataCalls).toEqual([
-      { recordId: firstImported.id, coverUrl: 'https://img.example.com/1.png' },
-      { recordId: secondImported.id },
-    ]);
+    expect(metadataCalls).toHaveLength(2);
+    expect(metadataCalls).toContainEqual({
+      recordId: firstImported.id,
+      coverUrl: 'https://img.example.com/1.png',
+    });
+    expect(metadataCalls).toContainEqual({
+      recordId: secondImported.id,
+    });
   });
 
   expect(await screen.findByText('The "Wait, Not Like That" Free Speech Panic')).toBeTruthy();
-  expect(screen.getByText('AI Is Polytheistic')).toBeTruthy();
-  expect(screen.getByText('3 bookmarks · Your ideas, in good company.')).toBeTruthy();
+  expect(screen.getByText('SomeOtherFolder')).toBeTruthy();
 });
 
 it('hides Import button on Trash and Recovery pages and clears Trash via Clear button', async () => {

@@ -303,8 +303,8 @@ describe('raindrop csv import and batch create', () => {
     const { parseRaindropCsv } = await import('../src/domain/csv');
     const csvWithBom =
       '\uFEFFid,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite\n' +
-      '1,,User note,Short excerpt,example.com/article,OtherFolder,"tag1, tag2",invalid-date,,Highlighted text,false\n' +
-      '2,Ignored Javascript,,,javascript:alert(1),OtherFolder,,,,,\n';
+      '1,,User note,Short excerpt,example.com/article,Unsorted,"tag1, tag2",invalid-date,,Highlighted text,false\n' +
+      '2,Ignored Javascript,,,javascript:alert(1),Unsorted,,,,,\n';
 
     const items = parseRaindropCsv(csvWithBom, { parentId: 'col-target' });
     expect(items).toHaveLength(1);
@@ -322,6 +322,117 @@ describe('raindrop csv import and batch create', () => {
     expect(() => parseRaindropCsv('url,title\n,Empty')).toThrow(
       'No valid bookmarks found in CSV file',
     );
+  });
+
+  it('preserves collections structure, creates missing collections, and reuses existing collections', async () => {
+    const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+    const existingTravel = makeItem('collection', {
+      id: 'existing-travel',
+      title: 'Travel',
+      parentId: null,
+      order: 'a0',
+    });
+    const existingWishlist = makeItem('collection', {
+      id: 'existing-wishlist',
+      title: 'wishlist',
+      parentId: 'existing-travel',
+      order: 'a0',
+    });
+
+    const csv = [
+      'id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite',
+      '1,Inbox Item,,,https://example.com/inbox,Unsorted,,2026-10-17T14:02:52.822Z,https://img.example.com/1.jpg,,false',
+      '2,Travel Root,,,https://example.com/travel,travel,,2026-10-16T00:00:00.000Z,,,false',
+      '3,Existing Wishlist Item,,,https://example.com/wishlist,travel / wishlist,,2026-10-16T01:00:00.000Z,https://img.example.com/3.jpg,,false',
+      '4,Singapore Sights,,,https://example.com/sg,travel / wishlist / singapore,,2026-10-16T02:00:00.000Z,,,false',
+      '5,Deep Skadis Item,,,https://example.com/skadis,"Projects, apps, tools / 3D / models / ikea skadis",,2026-10-16T03:00:00.000Z,,,false',
+      '6,Date Folder Item,,,https://example.com/trip,Arcable v2 / Family / travel / 2026/12,,2026-10-16T04:00:00.000Z,,,false',
+    ].join('\n');
+
+    const inbox = makeItem('collection', { id: 'inbox-col', title: 'Inbox' });
+    const entries = parseRaindropCsvWithCovers(csv, {
+      parentId: 'inbox-col',
+      existingCollections: [inbox, existingTravel, existingWishlist],
+      actor: 'test-importer',
+    });
+
+    const createdCols = entries.filter((e) => e.item.kind === 'collection').map((e) => e.item);
+    const bookmarks = entries.filter((e) => e.item.kind === 'bookmark').map((e) => e.item);
+
+    // Existing 'Travel' (case-insensitive) and 'wishlist' under Travel are reused, not recreated.
+    expect(createdCols.some((c) => c.title.toLowerCase() === 'travel' && c.parentId === null)).toBe(false);
+    expect(createdCols.some((c) => c.title.toLowerCase() === 'wishlist' && c.parentId === 'existing-travel')).toBe(false);
+
+    // 'singapore' collection created under existing-wishlist
+    const sgCol = createdCols.find((c) => c.title === 'singapore');
+    expect(sgCol).toBeDefined();
+    expect(sgCol?.parentId).toBe('existing-wishlist');
+
+    // Deep nesting: "Projects, apps, tools" -> "3D" -> "models" -> "ikea skadis"
+    const projCol = createdCols.find((c) => c.title === 'Projects, apps, tools');
+    expect(projCol).toBeDefined();
+    expect(projCol?.parentId).toBeNull();
+
+    const threeDCol = createdCols.find((c) => c.title === '3D');
+    expect(threeDCol).toBeDefined();
+    expect(threeDCol?.parentId).toBe(projCol?.id);
+
+    const modelsCol = createdCols.find((c) => c.title === 'models');
+    expect(modelsCol).toBeDefined();
+    expect(modelsCol?.parentId).toBe(threeDCol?.id);
+
+    const skadisCol = createdCols.find((c) => c.title === 'ikea skadis');
+    expect(skadisCol).toBeDefined();
+    expect(skadisCol?.parentId).toBe(modelsCol?.id);
+
+    // Date folder: Arcable v2 -> Family -> travel -> 2026/12 (preserving slashes in 2026/12)
+    const arcableCol = createdCols.find((c) => c.title === 'Arcable v2');
+    const familyCol = createdCols.find((c) => c.title === 'Family');
+    const arcTravelCol = createdCols.find((c) => c.title === 'travel' && c.parentId === familyCol?.id);
+    const dateCol = createdCols.find((c) => c.title === '2026/12');
+    expect(dateCol).toBeDefined();
+    expect(dateCol?.parentId).toBe(arcTravelCol?.id);
+
+    // Bookmarks routing
+    expect(bookmarks).toHaveLength(6);
+    expect(bookmarks[0].parentId).toBe('inbox-col'); // Unsorted -> inbox-col
+    expect(bookmarks[1].parentId).toBe('existing-travel'); // travel -> existing-travel
+    expect(bookmarks[2].parentId).toBe('existing-wishlist'); // travel / wishlist -> existing-wishlist
+    expect(bookmarks[3].parentId).toBe(sgCol?.id); // travel / wishlist / singapore
+    expect(bookmarks[4].parentId).toBe(skadisCol?.id); // deep nested
+    expect(bookmarks[5].parentId).toBe(dateCol?.id); // 2026/12 date collection
+
+    // Can be batch-applied to library without error
+    let library = createLibrary();
+    library = create(library, inbox);
+    library = create(library, existingTravel);
+    library = create(library, existingWishlist);
+    const updatedLib = applyOperation(library, {
+      id: 'import-op',
+      actor: 'test-importer',
+      type: 'create',
+      records: entries.map((e) => e.item),
+    });
+    expect(Object.keys(updatedLib.records).length).toBe(3 + entries.length);
+  });
+
+  it('runs tasks concurrently with runConcurrent up to concurrency limit', async () => {
+    const { runConcurrent } = await import('../src/domain/csv');
+    const items = [1, 2, 3, 4, 5, 6, 7, 8];
+    let active = 0;
+    let maxActive = 0;
+    const completed: number[] = [];
+
+    await runConcurrent(items, 3, async (num) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 10));
+      completed.push(num);
+      active--;
+    });
+
+    expect(maxActive).toBeLessThanOrEqual(3);
+    expect(completed).toHaveLength(8);
   });
 });
 

@@ -53,13 +53,17 @@ export function parseCsvRows(text: string): Record<string, string>[] {
 
 export interface RaindropImportOptions {
   parentId?: string | null;
+  baseParentId?: string | null;
   beforeOrder?: string | null;
   actor?: string;
+  existingCollections?: Item[];
+  preserveCollections?: boolean;
 }
 
 export interface RaindropImportEntry {
   item: Item;
   coverUrl?: string;
+  folderPath?: string;
 }
 
 export function parseRaindropCsvWithCovers(
@@ -71,8 +75,8 @@ export function parseRaindropCsvWithCovers(
   if (!Object.hasOwn(rows[0], 'url')) throw new Error('CSV file must include a url column');
 
   const actor = options.actor || 'local';
-  const parentId = options.parentId ?? null;
   const now = new Date().toISOString();
+  const preserveCollections = options.preserveCollections ?? true;
 
   const validRows: {
     url: string;
@@ -82,6 +86,7 @@ export function parseRaindropCsvWithCovers(
     tags: string[];
     createdAt: string;
     coverUrl?: string;
+    folder?: string;
   }[] = [];
 
   for (const row of rows) {
@@ -132,15 +137,102 @@ export function parseRaindropCsvWithCovers(
       tags,
       createdAt,
       coverUrl,
+      folder: (row.folder ?? '').trim(),
     });
   }
 
   if (!validRows.length) throw new Error('No valid bookmarks found in CSV file');
 
+  const colKey = (pId: string | null | undefined, title: string) =>
+    `${pId ?? ''}:::${title.trim().toLowerCase()}`;
+
+  const knownCollections = new Map<string, Item>();
+  const lastSiblingOrder = new Map<string, string>();
+
+  if (options.existingCollections) {
+    for (const col of options.existingCollections) {
+      if (col.kind !== 'collection') continue;
+      const key = colKey(col.parentId, col.title);
+      if (!knownCollections.has(key)) {
+        knownCollections.set(key, col);
+      }
+      const pKey = col.parentId ?? '';
+      const prevOrder = lastSiblingOrder.get(pKey);
+      if (!prevOrder || col.order > prevOrder) {
+        lastSiblingOrder.set(pKey, col.order);
+      }
+    }
+  }
+
+  const defaultParentId =
+    options.parentId ??
+    options.existingCollections?.find(
+      (c) => c.kind === 'collection' && c.title.toLowerCase() === 'inbox' && c.parentId === null,
+    )?.id ??
+    null;
+
+  const createdCollections: Item[] = [];
+
+  function getOrCreateCollection(segments: string[]): string | null {
+    let currentParentId: string | null = options.baseParentId ?? null;
+
+    for (const segment of segments) {
+      const key = colKey(currentParentId, segment);
+      const existing = knownCollections.get(key);
+      if (existing) {
+        currentParentId = existing.id;
+      } else {
+        const id = crypto.randomUUID();
+        const pKey = currentParentId ?? '';
+        const prevOrder = lastSiblingOrder.get(pKey) ?? null;
+        const order = orderBetween(prevOrder, null);
+        lastSiblingOrder.set(pKey, order);
+
+        const newCol = itemSchema.parse({
+          id,
+          kind: 'collection',
+          title: segment,
+          parentId: currentParentId,
+          description: '',
+          note: '',
+          tags: [],
+          order,
+          cover: { mode: 'emoji', emoji: '📁' },
+          createdAt: now,
+          updatedAt: now,
+          revision: { counter: 1, actor },
+        });
+
+        knownCollections.set(key, newCol);
+        createdCollections.push(newCol);
+        currentParentId = id;
+      }
+    }
+
+    return currentParentId;
+  }
+
+  const rowParentIds = validRows.map((entry) => {
+    const rawFolder = entry.folder ?? '';
+    const isUnsorted = !rawFolder || rawFolder.toLowerCase() === 'unsorted';
+
+    if (preserveCollections && !isUnsorted) {
+      const segments = rawFolder.split(/\s+[\/\\]\s+/).map((s) => s.trim()).filter(Boolean);
+      if (segments.length > 0) {
+        return getOrCreateCollection(segments);
+      }
+    }
+    return defaultParentId;
+  });
+
   const orders = ordersBetween(validRows.length, null, options.beforeOrder ?? null);
   const variantOrder = orderBetween();
 
-  return validRows.map((entry, index) => ({
+  const collectionEntries: RaindropImportEntry[] = createdCollections.map((col) => ({
+    item: col,
+  }));
+
+  const bookmarkEntries: RaindropImportEntry[] = validRows.map((entry, index) => ({
     item: itemSchema.parse({
       id: crypto.randomUUID(),
       kind: 'bookmark',
@@ -154,7 +246,7 @@ export function parseRaindropCsvWithCovers(
         },
       ],
       defaultVariantId: 'primary',
-      parentId,
+      parentId: rowParentIds[index],
       description: entry.description,
       note: entry.note,
       tags: entry.tags,
@@ -165,9 +257,33 @@ export function parseRaindropCsvWithCovers(
       revision: { counter: 1, actor },
     }),
     ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
+    ...(entry.folder ? { folderPath: entry.folder } : {}),
   }));
+
+  return [...collectionEntries, ...bookmarkEntries];
 }
 
 export function parseRaindropCsv(text: string, options: RaindropImportOptions = {}): Item[] {
   return parseRaindropCsvWithCovers(text, options).map((entry) => entry.item);
+}
+
+export async function runConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<unknown>,
+): Promise<void> {
+  if (!items.length) return;
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  let index = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      try {
+        await fn(items[i]);
+      } catch {
+        // Individual item errors do not stop remaining tasks
+      }
+    }
+  });
+  await Promise.all(workers);
 }
