@@ -82,3 +82,16 @@ it('validates optional GitHub personal access tokens, encodes auth headers, and 
   }
 });
 
+it('parses GitHub repository URLs and handles per-request credentials in hosted mode', async () => {
+  const { parseGitHubRepo, getStore, GitHubStore } = await import('../src/storage');
+  expect(parseGitHubRepo('user/repo')).toEqual({ owner: 'user', repo: 'repo' });
+  expect(parseGitHubRepo('https://github.com/user/repo.git')).toEqual({ owner: 'user', repo: 'repo' });
+  expect(parseGitHubRepo('git@github.com:user/repo.git')).toEqual({ owner: 'user', repo: 'repo' });
+
+  vi.stubEnv('GITDROP_MODE', 'github');
+  vi.stubEnv('GITHUB_REPOSITORY', '');
+  vi.stubEnv('GITHUB_TOKEN', '');
+  const customStore = getStore({ repository: 'custom-user/custom-repo', token: 'custom-pat' });
+  expect(customStore).toBeInstanceOf(GitHubStore);
+});
+

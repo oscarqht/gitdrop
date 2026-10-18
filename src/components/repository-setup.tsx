@@ -36,21 +36,43 @@ export function RepositorySetup({
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const isGithubMode = (api.data?.mode ?? api.mode) === 'github';
+
   const load = useCallback(
     async (updateInput = true) => {
-      const response = await fetch('/api/repository');
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not load repository settings.');
-      setRepository(data);
-      onRepositoryChange?.(data);
-      if (updateInput) setUrl(data.url || '');
+      if (typeof window !== 'undefined') {
+        const localRepo = localStorage.getItem('gitdrop:github_repository');
+        const localToken = localStorage.getItem('gitdrop:github_token');
+        if (localRepo) {
+          const repoData: RepositoryInfo = {
+            url: localRepo,
+            branch: 'main',
+            hasToken: !!localToken,
+          };
+          setRepository(repoData);
+          onRepositoryChange?.(repoData);
+          if (updateInput) setUrl(localRepo);
+        }
+      }
+      try {
+        const response = await fetch('/api/repository');
+        const data = await response.json();
+        if (response.ok) {
+          setRepository(data);
+          onRepositoryChange?.(data);
+          if (updateInput) setUrl(data.url || '');
+        }
+      } catch {
+        /* ignore */
+      }
     },
     [onRepositoryChange],
   );
+
   useEffect(() => {
-    if (api.data?.mode === 'github') return;
     void load().catch(() => {});
-  }, [api.data?.mode, load]);
+  }, [load]);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -59,38 +81,32 @@ export function RepositorySetup({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [busy, open, setOpen]);
+
   function openModal(tab?: SettingsTab) {
     if (tab) setActiveTab(tab);
     setError('');
     api.setError('');
     setOpen(true);
-    if (api.data?.mode !== 'github') {
-      void load().catch((e) => setError((e as Error).message));
-    }
+    void load().catch((e) => setError((e as Error).message));
   }
-  const isGithubMode = api.data?.mode === 'github';
+
   return (
     <>
       <button
         type="button"
         className="repository repository-button"
-        disabled={api.disabled}
         onClick={() => openModal()}
       >
         <GitBranch size={15} />
         <span className="ellipsis">
-          {isGithubMode
-            ? 'Private repository'
-            : repository?.url
-              ? 'Repository settings'
-              : 'Connect repository'}
+          {repository?.url
+            ? 'Repository settings'
+            : 'Connect repository'}
           <small className="ellipsis">
-            {isGithubMode
-              ? 'Connected through GitHub'
-              : repository?.url || 'Set remote Git URL to sync'}
+            {repository?.url || (isGithubMode ? 'Set GitHub repository to sync' : 'Set remote Git URL to sync')}
           </small>
         </span>
-        {isGithubMode || repository?.url ? (
+        {repository?.url ? (
           <span className="green-dot" />
         ) : (
           <span className="repository-action">Set URL</span>
@@ -168,9 +184,35 @@ export function RepositorySetup({
                     setBusy(true);
                     setError('');
                     api.setError('');
-                    const payload = token.trim() ? { url, token: token.trim() } : { url };
+                    const trimmedUrl = url.trim();
+                    const trimmedToken = token.trim();
+
+                    if (isGithubMode) {
+                      if (!trimmedUrl) {
+                        setError('Please enter a GitHub repository (e.g. owner/repo).');
+                        setBusy(false);
+                        return;
+                      }
+                      const storedToken =
+                        typeof window !== 'undefined'
+                          ? localStorage.getItem('gitdrop:github_token') || ''
+                          : '';
+                      const effectiveToken = trimmedToken || storedToken;
+                      if (!effectiveToken) {
+                        setError('Please enter your GitHub personal access token.');
+                        setBusy(false);
+                        return;
+                      }
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('gitdrop:github_repository', trimmedUrl);
+                        if (trimmedToken) localStorage.setItem('gitdrop:github_token', trimmedToken);
+                      }
+                    }
+
+                    const payload = trimmedToken
+                      ? { url: trimmedUrl, token: trimmedToken }
+                      : { url: trimmedUrl };
                     const saved = await api.action('/api/repository', JSON.stringify(payload));
-                    // Refresh even on sync failure: the saved origin is reusable for retries.
                     try {
                       await load(!!saved);
                     } catch (e) {
@@ -180,23 +222,31 @@ export function RepositorySetup({
                     if (saved) {
                       setToken('');
                       setOpen(false);
+                      if (isGithubMode) {
+                        await api.refresh();
+                      }
                     }
                   }}
                 >
                   <h3>Connect your repository</h3>
                   <p>
-                    Use an empty private repository or an existing Gitdrop library. Your local
-                    bookmarks are kept.
+                    {isGithubMode
+                      ? 'Use a private GitHub repository to store your bookmark library in readable JSON files.'
+                      : 'Use an empty private repository or an existing Gitdrop library. Your local bookmarks are kept.'}
                   </p>
                   <label>
-                    Git repository URL
+                    {isGithubMode ? 'GitHub repository' : 'Git repository URL'}
                     <input
                       autoFocus
                       required
                       maxLength={2048}
                       disabled={busy}
                       value={url}
-                      placeholder="https://github.com/you/your-library.git"
+                      placeholder={
+                        isGithubMode
+                          ? 'owner/repo or https://github.com/owner/repo.git'
+                          : 'https://github.com/you/your-library.git'
+                      }
                       onChange={(event) => setUrl(event.target.value)}
                       autoComplete="off"
                       spellCheck={false}
@@ -204,7 +254,13 @@ export function RepositorySetup({
                   </label>
                   <label>
                     GitHub personal access token{' '}
-                    {repository?.hasToken ? '(saved on server)' : '(optional)'}
+                    {repository?.hasToken
+                      ? isGithubMode
+                        ? '(saved in browser)'
+                        : '(saved on server)'
+                      : isGithubMode
+                        ? '(required)'
+                        : '(optional)'}
                     <input
                       type="password"
                       maxLength={512}
@@ -212,7 +268,9 @@ export function RepositorySetup({
                       value={token}
                       placeholder={
                         repository?.hasToken
-                          ? 'Saved on server — enter a new token to replace'
+                          ? isGithubMode
+                            ? 'Saved in browser — enter a new token to replace'
+                            : 'Saved on server — enter a new token to replace'
                           : 'github_pat_... or ghp_...'
                       }
                       onChange={(event) => setToken(event.target.value)}
@@ -221,13 +279,14 @@ export function RepositorySetup({
                     />
                   </label>
                   <p className="repository-help">
-                    Enter a GitHub PAT with repository Contents read/write access to connect a
-                    private repository, or leave blank to use existing server Git credentials.
+                    {isGithubMode
+                      ? 'Enter a fine-grained GitHub PAT with Contents read/write access. Saved securely in your browser local storage.'
+                      : 'Enter a GitHub PAT with repository Contents read/write access to connect a private repository, or leave blank to use existing server Git credentials.'}
                   </p>
                   <p className="repository-help">
-                    The URL and token are remembered on this server
-                    {repository ? ` for branch ${repository.branch}` : ''}. Sync runs automatically
-                    while the server is running.
+                    {isGithubMode
+                      ? 'Changes are committed directly to your repository branch.'
+                      : `The URL and token are remembered on this server${repository ? ` for branch ${repository.branch}` : ''}. Sync runs automatically while the server is running.`}
                   </p>
                   {(error || api.error) && (
                     <p role="alert" className="repository-error">
@@ -238,7 +297,7 @@ export function RepositorySetup({
                     <button type="button" disabled={busy} onClick={() => setOpen(false)}>
                       Cancel
                     </button>
-                    <button className="primary" disabled={busy || api.disabled || !url.trim()}>
+                    <button className="primary" disabled={busy || !url.trim()}>
                       {busy ? 'Connecting & syncing…' : 'Save & sync'}
                     </button>
                   </div>
@@ -298,4 +357,3 @@ export function RepositorySetup({
 }
 
 export const SettingsDialog = RepositorySetup;
-

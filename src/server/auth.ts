@@ -12,11 +12,15 @@ export class HttpError extends Error {
 export const hosted = () => process.env.GITDROP_MODE === 'github';
 function secret() {
   const value = process.env.GITDROP_SESSION_SECRET;
-  if (!value || value.length < 32)
+  if (!value || value.length < 32) {
+    if (!process.env.GITHUB_CLIENT_ID) {
+      return 'gitdrop-default-session-secret-for-pat-mode-minimum-32-chars';
+    }
     throw new HttpError(
       503,
       'Configure GITDROP_SESSION_SECRET with at least 32 random characters.',
     );
+  }
   return value;
 }
 export function sign(value: object): string {
@@ -50,10 +54,21 @@ export function appOrigin(request: Request) {
   if (hosted()) {
     const configured = process.env.GITDROP_APP_URL;
     if (!configured) throw new HttpError(503, 'Configure GITDROP_APP_URL.');
-    const url = new URL(configured);
-    if (url.protocol !== 'https:')
+    const configuredUrl = new URL(configured);
+    if (configuredUrl.protocol !== 'https:')
       throw new HttpError(503, 'Hosted GITDROP_APP_URL must use HTTPS.');
-    return url.origin;
+
+    const requestUrl = new URL(request.url);
+    const incomingHost = request.headers.get('host');
+    const incomingProto = request.headers.get('x-forwarded-proto') || requestUrl.protocol.replace(':', '');
+    const host = incomingHost || requestUrl.host;
+    const hostname = host.split(':')[0];
+    if (incomingHost && ['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+      const port = host.includes(':') ? `:${host.split(':')[1]}` : (requestUrl.port ? `:${requestUrl.port}` : '');
+      return `${incomingProto}://${hostname}${port}`;
+    }
+
+    return configuredUrl.origin;
   }
   const requestUrl = new URL(request.url);
   const incomingHost = request.headers.get('host');
@@ -74,17 +89,19 @@ export function requireAccess(request: Request, mutate = false) {
     throw new HttpError(403, 'Same-origin request required.');
   }
   if (hosted()) {
-    const data = verify(cookie(request, 'gitdrop-session'));
-    const owner = process.env.GITDROP_GITHUB_USER?.toLowerCase();
-    if (!owner || data?.user !== owner || data?.purpose !== 'session')
-      throw new HttpError(401, 'Sign in with the configured GitHub account.');
+    if (process.env.GITHUB_CLIENT_ID) {
+      const data = verify(cookie(request, 'gitdrop-session'));
+      const owner = process.env.GITDROP_GITHUB_USER?.toLowerCase();
+      if (!data?.user || typeof data.user !== 'string' || data.purpose !== 'session' || (owner && data.user !== owner))
+        throw new HttpError(401, 'Sign in with your GitHub account.');
+    }
   }
 }
-export function sessionScope() {
+export function sessionScope(user?: string, repo?: string, branch?: string) {
   return createHash('sha256')
     .update(
       hosted()
-        ? `github:${process.env.GITDROP_GITHUB_USER}:${process.env.GITHUB_REPOSITORY}:${process.env.GITDROP_BRANCH || 'main'}`
+        ? `github:${user || process.env.GITDROP_GITHUB_USER || ''}:${repo || process.env.GITHUB_REPOSITORY || ''}:${branch || process.env.GITDROP_BRANCH || 'main'}`
         : `local:${process.env.GITDROP_DATA_DIR || `${homedir()}/.gitdrop/library`}`,
     )
     .digest('hex');
@@ -98,6 +115,7 @@ export function oauthStart(request: Request) {
   target.searchParams.set('client_id', clientId);
   target.searchParams.set('redirect_uri', `${origin}/api/auth/callback`);
   target.searchParams.set('state', state);
+  const secure = origin.startsWith('https:');
   return new Response(null, {
     status: 302,
     headers: {
@@ -106,12 +124,14 @@ export function oauthStart(request: Request) {
         'gitdrop-oauth',
         sign({ state, purpose: 'oauth', exp: Date.now() + 600_000 }),
         600,
+        secure,
       ),
     },
   });
 }
-export function sessionCookie(name: string, value: string, maxAge: number) {
-  return `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${hosted() ? '; Secure' : ''}`;
+export function sessionCookie(name: string, value: string, maxAge: number, secure?: boolean) {
+  const isSecure = secure !== undefined ? secure : hosted();
+  return `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${isSecure ? '; Secure' : ''}`;
 }
 export async function oauthCallback(request: Request) {
   const origin = appOrigin(request);
@@ -146,17 +166,20 @@ export async function oauthCallback(request: Request) {
   });
   const user = await userResponse.json();
   const login = typeof user.login === 'string' ? user.login.toLowerCase() : '';
-  if (!userResponse.ok || !login || login !== process.env.GITDROP_GITHUB_USER?.toLowerCase())
+  const owner = process.env.GITDROP_GITHUB_USER?.toLowerCase();
+  if (!userResponse.ok || !login || (owner && login !== owner))
     throw new HttpError(403, 'This GitHub account is not the configured owner.');
   const headers = new Headers({ Location: origin });
+  const secure = origin.startsWith('https:');
   headers.append(
     'Set-Cookie',
     sessionCookie(
       'gitdrop-session',
       sign({ user: login, purpose: 'session', exp: Date.now() + 7 * 86400_000 }),
       7 * 86400,
+      secure,
     ),
   );
-  headers.append('Set-Cookie', sessionCookie('gitdrop-oauth', '', 0));
+  headers.append('Set-Cookie', sessionCookie('gitdrop-oauth', '', 0, secure));
   return new Response(null, { status: 302, headers });
 }

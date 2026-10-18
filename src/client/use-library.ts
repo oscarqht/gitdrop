@@ -16,8 +16,20 @@ import {
   type Snapshot,
   type Cache,
 } from './store';
+
+function getClientCredentialsHeaders() {
+  if (typeof window === 'undefined') return {};
+  const headers: Record<string, string> = {};
+  const repo = localStorage.getItem('gitdrop:github_repository');
+  const token = localStorage.getItem('gitdrop:github_token');
+  if (repo) headers['x-github-repository'] = repo;
+  if (token) headers['x-github-token'] = token;
+  return headers;
+}
+
 export function useLibrary() {
   const [data, setData] = useState<Snapshot>();
+  const [mode, setMode] = useState<'local' | 'github'>('local');
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState('');
   const [login, setLogin] = useState(false);
@@ -37,7 +49,20 @@ export function useLibrary() {
     }
   }, []);
   const request = useCallback(async (url: string, init?: RequestInit) => {
-    const r = await fetch(url, init);
+    const credHeaders = getClientCredentialsHeaders();
+    let headers: HeadersInit | undefined = init?.headers;
+    if (Object.keys(credHeaders).length > 0) {
+      if (headers instanceof Headers) {
+        for (const [k, v] of Object.entries(credHeaders)) {
+          if (!headers.has(k)) headers.set(k, v);
+        }
+      } else if (Array.isArray(headers)) {
+        headers = [...headers, ...Object.entries(credHeaders)];
+      } else {
+        headers = { ...credHeaders, ...headers };
+      }
+    }
+    const r = await fetch(url, { ...init, headers });
     if (r.status === 401) {
       verified.current = false;
       setLogin(true);
@@ -146,6 +171,7 @@ export function useLibrary() {
           }
         }
         const session = await request('/api/session');
+        if (session.mode) setMode(session.mode);
         if (!session.authenticated) {
           state.current = undefined;
           setData(undefined);
@@ -162,6 +188,11 @@ export function useLibrary() {
           state.current = cached;
           await publish();
           setStatus('Cached');
+        }
+        if (session.mode === 'github' && session.configured === false) {
+          setStatus('Connect repository');
+          setError('Please configure your GitHub repository and personal access token in Settings.');
+          return;
         }
         await refresh();
       } catch (e) {
@@ -283,11 +314,14 @@ export function useLibrary() {
       for (const key of await caches.keys())
         if (key.startsWith('gitdrop-')) await caches.delete(key);
     localStorage.removeItem('gitdrop:lastScope');
+    localStorage.removeItem('gitdrop:github_repository');
+    localStorage.removeItem('gitdrop:github_token');
     await fetch('/api/auth/logout', { method: 'POST' });
     location.reload();
   };
   return {
     data,
+    mode: data?.mode ?? mode,
     status,
     error,
     setError,

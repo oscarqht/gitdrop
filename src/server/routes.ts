@@ -9,7 +9,7 @@ import {
   type Operation,
   type Item,
 } from '../domain/types';
-import { getStore, LocalStore, GitHubStore } from '../storage';
+import { getStore, LocalStore, GitHubStore, parseGitHubRepo, type GitHubCredentials } from '../storage';
 import { handler, json, readBody, readJson, snapshot } from './http';
 import {
   HttpError,
@@ -19,11 +19,38 @@ import {
   requireAccess,
   sessionCookie,
   sessionScope,
+  appOrigin,
+  cookie,
+  verify,
 } from './auth';
 import { fetchCover, fetchMetadata, optimizeImage } from './metadata';
 import { exportHtml } from './export';
 import { startSyncWorker, syncNow } from './sync-worker';
 import { repositoryToken, repositoryUrl } from '../storage/repository';
+
+export function resolveGitHubCredentials(request?: Request): GitHubCredentials {
+  if (!request) {
+    return {
+      repository: process.env.GITHUB_REPOSITORY,
+      token: process.env.GITHUB_TOKEN,
+      branch: process.env.GITDROP_BRANCH,
+    };
+  }
+  const headers = request.headers;
+  const url = new URL(request.url);
+  const repoHeader = headers.get('x-github-repository') || headers.get('x-gitdrop-repository');
+  const tokenHeader = headers.get('x-github-token') || headers.get('x-gitdrop-token');
+  const repoCookie = cookie(request, 'gitdrop-repo');
+  const tokenCookie = cookie(request, 'gitdrop-token');
+  const repoParam = url.searchParams.get('repo');
+  const tokenParam = url.searchParams.get('token');
+
+  const repository = repoHeader || repoCookie || repoParam || process.env.GITHUB_REPOSITORY || undefined;
+  const token = tokenHeader || tokenCookie || tokenParam || process.env.GITHUB_TOKEN || undefined;
+  const branch = headers.get('x-github-branch') || url.searchParams.get('branch') || process.env.GITDROP_BRANCH || undefined;
+
+  return { repository, token, branch };
+}
 
 const operationSchema = z
   .object({
@@ -62,9 +89,12 @@ const operationSchema = z
       .optional(),
   })
   .strict();
+
 const initialized = new WeakMap<LocalStore, Promise<unknown>>();
+
 export const libraryGet = handler(async (request) => {
-  const store = getStore();
+  const creds = resolveGitHubCredentials(request);
+  const store = getStore(creds);
   const known = new URL(request.url).searchParams.get('revision');
   if (
     store instanceof GitHubStore &&
@@ -88,34 +118,74 @@ export const libraryGet = handler(async (request) => {
   startSyncWorker();
   return snapshot(data);
 });
+
 export const operationPost = handler(async (request) => {
   const op = operationSchema.parse(await readJson(request, 20_000_000)) as Operation;
   if (op.base && op.base.id !== op.recordId)
     throw new HttpError(400, 'Base record ID must match the operation.');
   if (op.record && op.recordId && op.record.id !== op.recordId)
     throw new HttpError(400, 'Record IDs must match.');
-  return snapshot(await (await getStore()).mutate(op));
+  const creds = resolveGitHubCredentials(request);
+  return snapshot(await getStore(creds).mutate(op));
 }, true);
+
 export const syncPost = handler(async () => snapshot(await syncNow()), true);
-export const repositoryGet = handler(async () => {
+
+export const repositoryGet = handler(async (request) => {
+  if (hosted()) {
+    const creds = resolveGitHubCredentials(request);
+    return json({
+      url: creds.repository || null,
+      branch: creds.branch || process.env.GITDROP_BRANCH || 'main',
+      hasToken: !!creds.token,
+    });
+  }
   const store = getStore();
-  if (hosted() || !(store instanceof LocalStore))
+  if (!(store instanceof LocalStore))
     throw new HttpError(
       400,
-      'Repository setup is available in local mode. Hosted repositories use server environment settings.',
+      'Repository setup is available in local mode.',
     );
   return json(await store.repository());
 });
+
 export const repositoryPost = handler(async (request) => {
-  if (hosted() || !(getStore() instanceof LocalStore))
-    throw new HttpError(
-      400,
-      'Repository setup is available in local mode. Hosted repositories use server environment settings.',
-    );
   const { url, token } = z
     .object({ url: z.string().max(2048), token: z.string().max(512).optional() })
     .strict()
     .parse(await readJson(request, 8192));
+
+  if (hosted()) {
+    const creds = resolveGitHubCredentials(request);
+    const effectiveToken = token?.trim() || creds.token;
+    if (!effectiveToken) {
+      throw new HttpError(400, 'GitHub personal access token is required.');
+    }
+    const parsed = parseGitHubRepo(url);
+    if (!parsed) {
+      throw new HttpError(400, 'Invalid repository URL. Please enter owner/repo or a valid GitHub URL.');
+    }
+    const branch = creds.branch || process.env.GITDROP_BRANCH || 'main';
+    const store = new GitHubStore(parsed.owner, parsed.repo, effectiveToken, branch);
+    try {
+      const data = await store.read();
+      const res = snapshot(data);
+      const secure = appOrigin(request).startsWith('https:');
+      res.headers.append('Set-Cookie', sessionCookie('gitdrop-repo', `${parsed.owner}/${parsed.repo}`, 30 * 86400, secure));
+      res.headers.append('Set-Cookie', sessionCookie('gitdrop-token', effectiveToken, 30 * 86400, secure));
+      return res;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'GitHub connection failed.';
+      throw new HttpError(400, `GitHub connection failed: ${message}`);
+    }
+  }
+
+  const store = getStore();
+  if (!(store instanceof LocalStore))
+    throw new HttpError(
+      400,
+      'Repository setup is available in local mode.',
+    );
   const validated = repositoryUrl(url);
   const validatedToken = repositoryToken(token);
   try {
@@ -128,11 +198,13 @@ export const repositoryPost = handler(async (request) => {
     );
   }
 }, true);
+
 export const metadataPost = handler(async (request) => {
   const { recordId, coverUrl } = z
     .object({ recordId: idSchema, coverUrl: z.string().max(10000).optional() })
     .parse(await readJson(request));
-  const store = await getStore();
+  const creds = resolveGitHubCredentials(request);
+  const store = getStore(creds);
   const initial = await store.read();
   const original = initial.library.records[recordId];
   if (!original || original.kind !== 'bookmark') throw new HttpError(404, 'Bookmark not found.');
@@ -193,9 +265,11 @@ export const metadataPost = handler(async (request) => {
     next = await store.writeMedia(recordId, result.cover, 'automatic');
   return json({ ...next, mode: hosted() ? 'github' : 'local', warning: result.warning });
 }, true);
+
 export const mediaGet = handler(async (request) => {
   const id = idSchema.parse(new URL(request.url).searchParams.get('recordId'));
-  const store = getStore();
+  const creds = resolveGitHubCredentials(request);
+  const store = getStore(creds);
   const hash = new URL(request.url).searchParams.get('hash');
   if (hash && !/^[a-f0-9]{40}$/.test(hash)) throw new HttpError(400, 'Invalid image hash.');
   const image =
@@ -211,6 +285,7 @@ export const mediaGet = handler(async (request) => {
     },
   });
 });
+
 export const mediaPost = handler(async (request) => {
   const bytes = await readBody(request, 8_200_000);
   const data = await new Response(new Uint8Array(bytes), {
@@ -219,14 +294,15 @@ export const mediaPost = handler(async (request) => {
   const id = idSchema.parse(data.get('recordId'));
   const file = data.get('file');
   if (!file || typeof file === 'string') throw new HttpError(400, 'An image file is required.');
+  const creds = resolveGitHubCredentials(request);
   return snapshot(
-    await (
-      await getStore()
-    ).writeMedia(id, await optimizeImage(Buffer.from(await file.arrayBuffer()))),
+    await getStore(creds).writeMedia(id, await optimizeImage(Buffer.from(await file.arrayBuffer()))),
   );
 }, true);
+
 export const exportGet = handler(async (request) => {
-  const store = await getStore();
+  const creds = resolveGitHubCredentials(request);
+  const store = getStore(creds);
   const format = new URL(request.url).searchParams.get('format');
   if (format === 'html')
     return new Response(exportHtml((await store.read()).library), {
@@ -245,36 +321,61 @@ export const exportGet = handler(async (request) => {
     },
   });
 });
+
 export const sessionGet = handler(
   async (request) => {
     try {
       requireAccess(request);
-      return json({
+      const creds = resolveGitHubCredentials(request);
+      const sessionUser = hosted() ? (verify(cookie(request, 'gitdrop-session'))?.user as string) : undefined;
+      const hasOAuth = hosted() && !!process.env.GITHUB_CLIENT_ID;
+      const res = json({
         authenticated: true,
-        scope: sessionScope(),
+        user: sessionUser,
+        configured: hosted() ? !!(creds.repository && creds.token) : true,
+        repository: creds.repository || null,
+        scope: sessionScope(sessionUser, creds.repository, creds.branch),
         mode: hosted() ? 'github' : 'local',
-        loginUrl: '/api/auth/login',
+        loginUrl: hasOAuth ? '/api/auth/login' : null,
       });
+      if (hosted() && creds.repository && creds.token) {
+        const secure = appOrigin(request).startsWith('https:');
+        res.headers.append('Set-Cookie', sessionCookie('gitdrop-repo', creds.repository, 30 * 86400, secure));
+        res.headers.append('Set-Cookie', sessionCookie('gitdrop-token', creds.token, 30 * 86400, secure));
+      }
+      return res;
     } catch (e) {
       if (e instanceof HttpError && e.status === 401)
-        return json({ authenticated: false, mode: 'github', loginUrl: '/api/auth/login' });
+        return json({
+          authenticated: false,
+          mode: 'github',
+          loginUrl: process.env.GITHUB_CLIENT_ID ? '/api/auth/login' : null,
+        });
       throw e;
     }
   },
   false,
   false,
 );
+
 export const loginGet = handler(async (request) => oauthStart(request), false, false);
+
 export const callbackGet = handler(oauthCallback, false, false);
+
 export const logoutPost = handler(
-  async () =>
-    new Response(null, {
+  async (request) => {
+    const res = new Response(null, {
       status: 204,
       headers: {
-        'Set-Cookie': sessionCookie('gitdrop-session', '', 0),
         'Cache-Control': 'no-store',
         'Clear-Site-Data': '"cache", "storage"',
       },
-    }),
+    });
+    const secure = appOrigin(request).startsWith('https:');
+    res.headers.append('Set-Cookie', sessionCookie('gitdrop-session', '', 0, secure));
+    res.headers.append('Set-Cookie', sessionCookie('gitdrop-repo', '', 0, secure));
+    res.headers.append('Set-Cookie', sessionCookie('gitdrop-token', '', 0, secure));
+    return res;
+  },
   true,
 );

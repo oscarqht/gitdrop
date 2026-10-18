@@ -179,4 +179,33 @@ describe('hosted session authentication', () => {
       ),
     ).rejects.toThrow('configured owner');
   });
+  it('allows any signed-in GitHub user when GITDROP_GITHUB_USER is unset', async () => {
+    vi.stubEnv('GITDROP_GITHUB_USER', '');
+    const userSession = sign({ exp: Date.now() + 10000, user: 'any-user', purpose: 'session' });
+    expect(() =>
+      requireAccess(request('https://gitdrop.example', { cookie: `gitdrop-session=${userSession}` })),
+    ).not.toThrow();
+
+    const start = oauthStart(request('https://gitdrop.example/api/auth/login'));
+    const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
+    const pending = start.headers.get('set-cookie')!.split(';')[0];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ access_token: 'temporary' }))
+      .mockResolvedValueOnce(Response.json({ login: 'any-new-user' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const callback = await oauthCallback(
+      request(`https://gitdrop.example/api/auth/callback?state=${state}&code=abc`, {
+        cookie: pending,
+      }),
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get('set-cookie')).toContain('gitdrop-session=');
+  });
+  it('allows access without OAuth session when GITHUB_CLIENT_ID is not set', () => {
+    vi.stubEnv('GITHUB_CLIENT_ID', '');
+    vi.stubEnv('GITDROP_SESSION_SECRET', '');
+    expect(() => requireAccess(request('https://gitdrop.example'))).not.toThrow();
+    expect(() => oauthStart(request('https://gitdrop.example/api/auth/login'))).toThrow('Configure GitHub OAuth');
+  });
 });

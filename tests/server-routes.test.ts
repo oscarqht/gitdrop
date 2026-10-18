@@ -438,4 +438,21 @@ describe('web repository setup', () => {
       ).status,
     ).toBe(400);
   });
+  it('returns authenticated session in hosted mode even when OAuth is not configured', async () => {
+    vi.stubEnv('GITDROP_MODE', 'github');
+    vi.stubEnv('GITDROP_APP_URL', 'https://library.example');
+    vi.stubEnv('GITHUB_CLIENT_ID', '');
+    const res = await sessionGet(new Request('https://library.example/api/session', {
+      headers: {
+        'x-github-repository': 'owner/bookmarks',
+        'x-github-token': 'ghp_pat',
+      },
+    }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.authenticated).toBe(true);
+    expect(data.configured).toBe(true);
+    expect(data.repository).toBe('owner/bookmarks');
+    expect(data.loginUrl).toBeNull();
+  });
 });

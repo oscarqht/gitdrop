@@ -42,21 +42,34 @@ The server starts an automatic sync worker after the first library request, then
 
 ## Hosted deployment
 
-Deploy this Next.js application to Vercel, with a Node.js 22+ runtime. Initialize and push the data repository from a desktop first. Configure these server environment variables:
+Deploy this Next.js application to Vercel with a Node.js 22+ runtime.
+
+### Minimal setup (Personal Access Token)
+
+Since the webapp allows users to configure their GitHub repository and Personal Access Token (PAT) directly in the Settings dialog (stored in the browser's `localStorage`), you do **not** need to set up a GitHub OAuth application unless you want an OAuth sign-in gate.
+
+On Vercel, set these environment variables:
+
+| Variable | Value | Description |
+| --- | --- | --- |
+| `GITDROP_MODE` | `github` | Enables hosted GitHub storage mode |
+| `GITDROP_APP_URL` | `https://your-project.vercel.app` | (Optional) Your production HTTPS URL |
+
+When opening the app, users will see the "Connect repository" button / prompt, where they enter their GitHub repository (`owner/repo`) and GitHub PAT (with `repo` Contents read/write permissions).
+
+### Optional: GitHub OAuth Sign-In Gate
+
+If you prefer to gate access behind GitHub OAuth, configure these additional environment variables:
 
 | Variable | Value |
 | --- | --- |
-| `GITDROP_MODE` | `github` |
-| `GITHUB_REPOSITORY` | `owner/private-data-repository` |
-| `GITHUB_TOKEN` | Fine-grained PAT limited to this repository, Contents read/write |
-| `GITDROP_BRANCH` | `main`, or the shared data branch |
-| `GITDROP_APP_URL` | Exact HTTPS deployment origin |
-| `GITDROP_GITHUB_USER` | Your allowed GitHub login |
 | `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret |
 | `GITDROP_SESSION_SECRET` | Random secret of at least 32 characters |
+| `GITDROP_GITHUB_USER` | (Optional) Restrict sign-in to a specific GitHub username. Leave unset to allow any GitHub user. |
+| `GITDROP_BRANCH` | (Optional) `main`, or the shared data branch |
 
-Create a GitHub OAuth application with callback URL `https://YOUR_DOMAIN/api/auth/callback`. Sign-in authorizes only the configured owner. OAuth login identifies the user; the separately configured repository token performs data access. Neither token belongs in the data repo or browser code.
+Create a GitHub OAuth application with authorization callback URL `https://YOUR_DOMAIN/api/auth/callback`.
 
 The hosted client publishes commits without force-updating the branch. Races trigger semantic reconciliation and bounded retries. Rate-limit errors remain visible and pending for retry. There is no durable Vercel filesystem dependency.
 

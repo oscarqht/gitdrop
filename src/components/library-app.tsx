@@ -369,7 +369,7 @@ export default function LibraryApp() {
           <button
             className={`sync-status ${api.status.toLowerCase().replaceAll(' ', '-')}`}
             onClick={() => {
-              if (api.data?.mode === 'local' && repository && !repository.url) {
+              if (!repository?.url || api.status === 'Connect repository') {
                 api.setError('');
                 setOpenRepository(true);
                 return;
@@ -377,7 +377,7 @@ export default function LibraryApp() {
               void api.action('/api/sync');
             }}
             title={
-              api.data?.mode === 'local' && repository && !repository.url
+              !repository?.url || api.status === 'Connect repository'
                 ? 'Connect repository to sync'
                 : 'Sync now'
             }
@@ -455,6 +455,16 @@ export default function LibraryApp() {
           {api.error && (
             <div role="alert" className="notice">
               <span>{api.error}</span>
+              {(api.error.includes('Settings') || !repository?.url) && (
+                <button
+                  onClick={() => {
+                    api.setError('');
+                    setOpenRepository(true);
+                  }}
+                >
+                  Open Settings
+                </button>
+              )}
               <button
                 onClick={() => {
                   api.setError('');
@@ -568,22 +578,36 @@ export default function LibraryApp() {
                   <h2>
                     {query || tagQuery
                       ? 'Nothing here just yet.'
-                      : 'Make room for your next discovery.'}
+                      : (api.data?.mode === 'github' || api.mode === 'github') && !repository?.url
+                        ? 'Connect your GitHub repository.'
+                        : 'Make room for your next discovery.'}
                   </h2>
                   <p>
                     {query || tagQuery
                       ? 'Try another search or clear your filters.'
-                      : 'Save a link. Give it a home. Find it when it matters.'}
+                      : (api.data?.mode === 'github' || api.mode === 'github') && !repository?.url
+                        ? 'Connect your private data repository to store and sync your bookmarks.'
+                        : 'Save a link. Give it a home. Find it when it matters.'}
                   </p>
                   {!query && !tagQuery && (
-                    <button
-                      className="primary"
-                      disabled={api.disabled}
-                      onClick={() => setAdd(true)}
-                    >
-                      <Plus size={16} />
-                      Save your first bookmark
-                    </button>
+                    (api.data?.mode === 'github' || api.mode === 'github') && !repository?.url ? (
+                      <button
+                        className="primary"
+                        onClick={() => setOpenRepository(true)}
+                      >
+                        <GitBranch size={16} />
+                        Connect your GitHub repository
+                      </button>
+                    ) : (
+                      <button
+                        className="primary"
+                        disabled={api.disabled}
+                        onClick={() => setAdd(true)}
+                      >
+                        <Plus size={16} />
+                        Save your first bookmark
+                      </button>
+                    )
                   )}
                 </div>
               )}
@@ -601,7 +625,7 @@ export default function LibraryApp() {
             <GitBranch size={12} /> YOUR BOOKMARKS. YOUR FILES. YOURS.
           </span>
           <span>
-            {api.data?.mode === 'github' ? 'GitHub connected' : 'Stored locally, synced with Git'}
+            {(api.data?.mode ?? api.mode) === 'github' ? 'GitHub connected' : 'Stored locally, synced with Git'}
           </span>
         </div>
       </main>
