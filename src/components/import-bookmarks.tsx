@@ -68,8 +68,8 @@ export function ImportBookmarks({
         {progress || (
           <>
             <p>
-              Choose a local Raindrop CSV file to import. Collections structure will be preserved
-              and created if needed.
+              Choose a local Raindrop CSV file to import. Existing collections are reused.
+              Bookmark URLs already in your library or this CSV are skipped.
             </p>
             <label>
               CSV file

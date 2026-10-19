@@ -252,6 +252,7 @@ export default function LibraryApp() {
         beforeOrder,
         actor: actorId(),
         existingCollections: collections,
+        existingBookmarks: records,
       });
       await api.startImport(importFile.name, entries);
       setImportOpen(false);

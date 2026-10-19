@@ -14,12 +14,15 @@ export function ImportProgress({ job, mode, expanded = false, control }: Props) 
   const counts = importCounts(job);
   const saved = job.saved === job.entries.length;
   const complete = importComplete(job);
+  const nothingNew = job.entries.length === 0;
   const title = job.error
     ? 'Import needs attention'
     : complete
-      ? counts.covers.failed
-        ? 'Import finished with cover errors'
-        : 'Import complete'
+      ? nothingNew
+        ? 'Nothing new to import'
+        : counts.covers.failed
+          ? 'Import finished with cover errors'
+          : 'Import complete'
       : job.paused
         ? 'Import paused'
         : saved
@@ -43,9 +46,11 @@ export function ImportProgress({ job, mode, expanded = false, control }: Props) 
           <span>
             <strong>{title}</strong>
             <small>
-              {saved
-                ? `Covers ${counts.covers.processed.toLocaleString()} / ${counts.covers.total.toLocaleString()} processed`
-                : `${job.saved.toLocaleString()} / ${job.entries.length.toLocaleString()} records saved`}
+              {nothingNew
+                ? 'All bookmarks in this CSV already exist'
+                : saved
+                  ? `Covers ${counts.covers.processed.toLocaleString()} / ${counts.covers.total.toLocaleString()} processed`
+                  : `${job.saved.toLocaleString()} / ${job.entries.length.toLocaleString()} records saved`}
             </small>
           </span>
           <ChevronDown size={16} style={{ transform: open ? 'rotate(180deg)' : undefined }} />
@@ -155,7 +160,9 @@ export function ImportProgress({ job, mode, expanded = false, control }: Props) 
         )}
         <span role="status" aria-live="polite">
           {complete
-            ? 'All bookmark data saved'
+            ? nothingNew
+              ? 'No changes needed'
+              : 'All bookmark data saved'
             : job.error
               ? 'Progress kept on this device'
               : job.paused

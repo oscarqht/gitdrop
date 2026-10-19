@@ -57,6 +57,7 @@ export interface RaindropImportOptions {
   beforeOrder?: string | null;
   actor?: string;
   existingCollections?: Item[];
+  existingBookmarks?: Item[];
   preserveCollections?: boolean;
 }
 
@@ -64,6 +65,16 @@ export interface RaindropImportEntry {
   item: Item;
   coverUrl?: string;
   folderPath?: string;
+}
+
+function importUrl(raw: string): URL | undefined {
+  const value = raw.trim();
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`);
+    if (['http:', 'https:'].includes(url.protocol)) return url;
+  } catch {
+    // Invalid URLs cannot identify an imported bookmark.
+  }
 }
 
 export function parseRaindropCsvWithCovers(
@@ -89,16 +100,24 @@ export function parseRaindropCsvWithCovers(
     folder?: string;
   }[] = [];
 
+  const knownUrls = new Set<string>();
+  for (const item of options.existingBookmarks ?? []) {
+    if (item.kind !== 'bookmark') continue;
+    for (const variant of item.variants ?? []) {
+      const url = importUrl(variant.url);
+      if (url) knownUrls.add(url.href);
+    }
+  }
+  let validBookmarkCount = 0;
   for (const row of rows) {
     const rawUrl = (row.url ?? '').trim();
     if (!rawUrl) continue;
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(rawUrl.includes('://') ? rawUrl : `https://${rawUrl}`);
-    } catch {
-      continue;
-    }
-    if (!['http:', 'https:'].includes(parsedUrl.protocol)) continue;
+    const parsedUrl = importUrl(rawUrl);
+    if (!parsedUrl) continue;
+    validBookmarkCount++;
+    // Deduplicate before creating folders, including repeated rows in this CSV.
+    if (knownUrls.has(parsedUrl.href)) continue;
+    knownUrls.add(parsedUrl.href);
 
     const title = (row.title ?? '').trim() || parsedUrl.hostname;
     const description = (row.excerpt ?? row.description ?? '').trim();
@@ -141,7 +160,8 @@ export function parseRaindropCsvWithCovers(
     });
   }
 
-  if (!validRows.length) throw new Error('No valid bookmarks found in CSV file');
+  if (!validBookmarkCount) throw new Error('No valid bookmarks found in CSV file');
+  if (!validRows.length) return [];
 
   const colKey = (pId: string | null | undefined, title: string) =>
     `${pId ?? ''}:::${title.trim().toLowerCase()}`;
