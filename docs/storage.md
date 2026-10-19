@@ -1,10 +1,10 @@
 # Storage and synchronization
 
-Initialize a dedicated data directory with `npm run library -- init /absolute/path`.
+Initialize a dedicated data directory with `pnpm run library init /absolute/path`.
 Set `GITDROP_DATA_DIR` to that path before launching Next.js. The default is
 `~/.gitdrop/library` (resolved through the operating system home directory).
-`npm run library -- clone <remote> <directory>` clones an existing initialized
-repository. `npm run library -- sync <directory>` commits, fetches, semantically
+`pnpm run library clone <remote> <directory>` clones an existing initialized
+repository. `pnpm run library sync <directory>` commits, fetches, semantically
 merges, and pushes. A missing origin gives local-only operation; adding an empty
 remote is supported. Git credentials are managed by your normal Git credential
 helper, never stored in the bookmark repository.

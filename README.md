@@ -5,9 +5,9 @@ A local-first personal bookmark manager. Your collections are folders, bookmarks
 Each bookmark has a shared title and one or more named URL variants. Variants have independent ordering and default selection. Covers can be images or emoji.
 
 ```sh
-# Node.js 22+ and Git
-npm ci --include=dev
-npm run launch
+# Node.js 22.22.2+, pnpm 12.14.0, and Git
+pnpm install --frozen-lockfile --prod=false
+pnpm run launch
 ```
 
 The default data directory is `~/.gitdrop/library`, separate from this application repository.

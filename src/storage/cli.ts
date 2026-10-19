@@ -10,7 +10,7 @@ async function main() {
       path.join(os.homedir(), '.gitdrop', 'library'),
   );
   if (command === 'clone') {
-    if (!argument) throw new Error('Usage: npm run library -- clone <remote> <directory>');
+    if (!argument) throw new Error('Usage: pnpm run library clone <remote> <directory>');
     execFileSync('git', ['clone', '--', argument, directory], { stdio: 'inherit' });
   }
   const store = new LocalStore(directory, process.env.GITDROP_BRANCH || 'main');
