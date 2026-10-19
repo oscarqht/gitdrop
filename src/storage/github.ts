@@ -206,20 +206,25 @@ export class GitHubStore implements Store {
       if (state.parsed.diagnostics.length) throw new Error(state.parsed.diagnostics.join('\n'));
       const next = await change(state);
       const entries: any[] = [];
-      for (const [file, data] of next) {
-        if (state.files.get(file)?.equals(data)) continue;
-        const existing = state.entries.find((e: any) => e.path === file);
-        if (existing?.sha === gitBlobHash(data)) continue;
-        const reused = parseMediaReference(data);
-        if (reused && existing?.sha === reused.sha) continue;
-        const blob = reused
-          ? { sha: reused.sha }
-          : await this.api('/git/blobs', 'POST', {
-              content: data.toString('base64'),
-              encoding: 'base64',
-            });
-        entries.push({ path: file, mode: '100644', type: 'blob', sha: blob.sha });
-      }
+      const uploads = [...next];
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(4, uploads.length) }, async () => {
+        while (cursor < uploads.length) {
+          const [file, data] = uploads[cursor++];
+          if (state.files.get(file)?.equals(data)) continue;
+          const existing = state.entries.find((e: any) => e.path === file);
+          if (existing?.sha === gitBlobHash(data)) continue;
+          const reused = parseMediaReference(data);
+          if (reused && existing?.sha === reused.sha) continue;
+          const blob = reused
+            ? { sha: reused.sha }
+            : await this.api('/git/blobs', 'POST', {
+                content: data.toString('base64'),
+                encoding: 'base64',
+              });
+          entries.push({ path: file, mode: '100644', type: 'blob', sha: blob.sha });
+        }
+      }));
       for (const file of new Set([
         ...state.files.keys(),
         ...state.entries
@@ -316,6 +321,25 @@ export class GitHubStore implements Store {
           },
         },
       });
+      return encodeFiles(library, files, state.parsed.paths);
+    });
+  }
+  /** Publish an import cover batch together, rechecking edits against the latest head. */
+  async writeImportCovers(covers: { id: string; url: string; data: Buffer }[]) {
+    return this.write(async (state) => {
+      let library = state.parsed.library;
+      const files = await this.mediaFiles(state);
+      for (const cover of covers) {
+        const item = library.records[cover.id];
+        const variant = item?.variants?.find(v => v.id === item.defaultVariantId) || item?.variants?.[0];
+        if (!item || item.cover.mode !== 'automatic' || item.cover.imageHash || variant?.url !== cover.url) continue;
+        const file = state.parsed.paths[item.id].replace(/\.json$/, '.webp');
+        files.set(file, cover.data);
+        library = applyOperation(library, {
+          id: randomUUID(), actor: 'csv-cover', type: 'update', recordId: item.id,
+          patch: { cover: { ...item.cover, imageFile: path.posix.basename(file), imageHash: mediaHash(cover.data) } },
+        });
+      }
       return encodeFiles(library, files, state.parsed.paths);
     });
   }

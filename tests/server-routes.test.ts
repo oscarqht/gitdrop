@@ -456,3 +456,33 @@ describe('web repository setup', () => {
     expect(data.loginUrl).toBeNull();
   });
 });
+
+it('processes import covers independently and reports unavailable images without failing the batch', async () => {
+  const { importCoversPost } = await import('../src/server/import-covers');
+  const { fetchMetadata } = await import('../src/server/metadata');
+  await create();
+  vi.mocked(fetchMetadata).mockResolvedValueOnce({ title: 'Ignored', description: 'Ignored', cover: undefined, warning: undefined });
+  const res = await importCoversPost(request('import-covers', { entries: [{ recordId: 'book' }, { recordId: 'gone' }] }));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.coverOutcomes.map((e: any) => e.status)).toEqual(['unavailable', 'unavailable']);
+  expect(body.library.records.book.title).toBe('example.com');
+});
+
+it('reports a failed cover, persists successful images, and does not download them again on retry', async () => {
+  const { importCoversPost } = await import('../src/server/import-covers');
+  const { fetchMetadata, fetchCover } = await import('../src/server/metadata');
+  await create();
+  vi.mocked(fetchMetadata).mockRejectedValueOnce(new Error('Network error'));
+  let res = await importCoversPost(request('import-covers', { entries: [{ recordId: 'book' }] }));
+  expect((await res.json()).coverOutcomes[0].status).toBe('failed');
+  const data = await sharp({ create: { width: 10, height: 10, channels: 3, background: '#abcdef' } }).webp().toBuffer();
+  vi.mocked(fetchCover).mockResolvedValueOnce(data);
+  res = await importCoversPost(request('import-covers', { entries: [{ recordId: 'book', coverUrl: 'https://cover.test/image' }] }));
+  expect((await res.json()).coverOutcomes[0].status).toBe('fetched');
+  expect((await shared.store.read()).library.records.book.cover.imageHash).toBeTruthy();
+  const before = vi.mocked(fetchMetadata).mock.calls.length;
+  res = await importCoversPost(request('import-covers', { entries: [{ recordId: 'book' }] }));
+  expect((await res.json()).coverOutcomes[0].status).toBe('fetched');
+  expect(vi.mocked(fetchMetadata).mock.calls.length).toBe(before);
+});

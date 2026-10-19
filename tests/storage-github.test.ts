@@ -3,12 +3,15 @@ import { GitHubStore } from '../src/storage/github';
 import { createLibrary, makeItem, applyOperation } from '../src/domain/operations';
 import { encodeFiles, gitBlobHash, decodeFiles } from '../src/storage/codec';
 afterEach(() => vi.unstubAllGlobals());
-it.each(['normal', 'race', 'lost-response'])(
+it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
   'reads verified shards and publishes safely: %s',
   async (scenario) => {
     const library = createLibrary();
     const item = makeItem('bookmark', { title: 'Shared', url: 'https://example.com' });
     library.records[item.id] = item;
+    const second = makeItem('bookmark', { title: 'Second', url: 'https://second.example.com' });
+    const manual = makeItem('bookmark', { title: 'Manual', url: 'https://manual.example.com', cover: { mode: 'emoji', emoji: '⭐' } });
+    if (scenario === 'cover-batch') { library.records[second.id] = second; library.records[manual.id] = manual; }
     let files = encodeFiles(library);
     let head = 'head0';
     let treeId = 'tree0';
@@ -27,6 +30,8 @@ it.each(['normal', 'race', 'lost-response'])(
     };
     refresh();
     const updates: any[] = [];
+    let uploading = 0;
+    let maxUploading = 0;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init: any) => {
@@ -41,6 +46,9 @@ it.each(['normal', 'race', 'lost-response'])(
         else if (route.startsWith('/git/blobs/') && init.method === 'GET')
           result = { content: blobs.get(route.split('/').pop()!)!.toString('base64') };
         else if (route === '/git/blobs') {
+          uploading++; maxUploading = Math.max(maxUploading, uploading);
+          await new Promise(resolve => setTimeout(resolve, 2));
+          uploading--;
           const data = Buffer.from(body.content, 'base64');
           const sha = gitBlobHash(data);
           blobs.set(sha, data);
@@ -87,6 +95,21 @@ it.each(['normal', 'race', 'lost-response'])(
     );
     const store = new GitHubStore('test', 'library', 'secret');
     expect((await store.read()).library.records[item.id].title).toBe('Shared');
+    if (scenario === 'cover-batch') {
+      const result = await store.writeImportCovers([item, second, manual].map(record => ({
+        id: record.id, url: record.variants![0].url, data: Buffer.from(`image-${record.id}`),
+      })));
+      expect(result.library.records[item.id].cover.imageHash).toBeTruthy();
+      expect(result.library.records[second.id].cover.imageHash).toBeTruthy();
+      expect(result.library.records[manual.id].cover).toEqual(manual.cover);
+      expect(updates).toHaveLength(1);
+      expect(maxUploading).toBeGreaterThan(1);
+      expect(maxUploading).toBeLessThanOrEqual(4);
+      const again = await store.writeImportCovers([{ id: item.id, url: item.variants![0].url, data: Buffer.from('replacement') }]);
+      expect(again.library.records[item.id].cover.imageHash).toBe(result.library.records[item.id].cover.imageHash);
+      expect(updates).toHaveLength(1);
+      return;
+    }
     const result = await store.mutate({
       id: 'edit',
       actor: 'mobile',

@@ -1,5 +1,7 @@
 'use client';
 import { AddBookmark } from './add-bookmark';
+import { ImportProgress } from './import-progress';
+import { importComplete } from '../client/import-job';
 import { ImportBookmarks } from './import-bookmarks';
 import { Sidebar, builtins } from './sidebar';
 import { TrashView, RecoveryView } from './recovery-views';
@@ -27,7 +29,7 @@ import {
 } from 'lucide-react';
 import { type Item } from '../domain/types';
 import { orderBetween } from '../domain/order';
-import { parseRaindropCsvWithCovers, runConcurrent } from '../domain/csv';
+import { parseRaindropCsvWithCovers } from '../domain/csv';
 import { useLibrary } from '../client/use-library';
 import { actorId } from '../client/store';
 import { Detail } from './detail';
@@ -251,25 +253,9 @@ export default function LibraryApp() {
         actor: actorId(),
         existingCollections: collections,
       });
-      await api.mutate({
-        type: 'create',
-        records: entries.map((entry) => entry.item),
-      });
+      await api.startImport(importFile.name, entries);
       setImportOpen(false);
       setImportFile(null);
-      void (async () => {
-        const bookmarkEntries = entries.filter((entry) => entry.item.kind === 'bookmark');
-        await runConcurrent(bookmarkEntries, 6, async (entry) => {
-          await api.action(
-            '/api/metadata',
-            JSON.stringify({
-              recordId: entry.item.id,
-              ...(entry.coverUrl ? { coverUrl: entry.coverUrl } : {}),
-            }),
-          );
-        });
-        await api.refresh();
-      })();
     } catch (e) {
       api.setError((e as Error).message);
     } finally {
@@ -671,7 +657,17 @@ export default function LibraryApp() {
           collectionTitle={current?.title}
           importing={importing}
           disabled={api.disabled}
+          progress={
+            api.importJob && !importComplete(api.importJob) ? (
+              <ImportProgress job={api.importJob} mode={api.mode} expanded control={api.controlImport} />
+            ) : undefined
+          }
         />
+      )}
+      {api.importJob && !importOpen && (
+        <div className="import-progress-dock">
+          <ImportProgress job={api.importJob} mode={api.mode} control={api.controlImport} />
+        </div>
       )}
     </div>
   );
