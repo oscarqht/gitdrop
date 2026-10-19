@@ -71,6 +71,15 @@ async function create() {
   return (await response.json()).library.records.book;
 }
 describe('application API', () => {
+  it('allows hosted PAT setup without GITDROP_APP_URL', async () => {
+    vi.stubEnv('GITDROP_MODE', 'github');
+    vi.stubEnv('GITDROP_APP_URL', '');
+    vi.stubEnv('GITHUB_CLIENT_ID', '');
+    const response = await repositoryGet(request('repository'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ branch: 'main' });
+    expect((await sessionGet(request('session'))).status).toBe(200);
+  });
   it('boots an Inbox and returns a scoped session', async () => {
     const data = await (await libraryGet(request('library'))).json();
     expect(data.library.records.inbox.title).toBe('Inbox');
