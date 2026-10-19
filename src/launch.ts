@@ -1,13 +1,12 @@
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
+import { fileURLToPath } from 'node:url';
 const port = Number(process.env.PORT || 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error('PORT must be between 1 and 65535.');
 const child = spawn(
   process.execPath,
-  [require.resolve('next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', String(port)],
-  { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'development' } },
+  [fileURLToPath(new URL('../scripts/dev.mjs', import.meta.url)), '--port', String(port)],
+  { stdio: 'inherit' },
 );
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => child.kill(signal));
 child.on('exit', (code) => process.exit(code ?? 0));
