@@ -9,6 +9,7 @@ import {
   type ImportJob,
 } from './import-job';
 import type { RaindropImportEntry } from '../domain/csv';
+import { IMPORT_COVER_BATCH_SIZE } from '../domain/import-limits';
 import type { Operation } from '../domain/types';
 import {
   archivePending,
@@ -78,17 +79,29 @@ export function useLibrary() {
         headers = { ...credHeaders, ...headers };
       }
     }
-    const r = await fetch(url, { ...init, headers });
-    if (r.status === 401) {
-      verified.current = false;
-      setLogin(true);
-      throw new Error('Please sign in to continue');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const r = await fetch(url, { ...init, headers, signal: controller.signal });
+      if (r.status === 401) {
+        verified.current = false;
+        setLogin(true);
+        throw new Error('Please sign in to continue');
+      }
+      if (!r.ok) {
+        const b = await r.json().catch(() => ({}));
+        throw new Error(typeof b.error === 'string' ? b.error : 'The request could not be completed');
+      }
+      return await r.json();
+    } catch (error) {
+      if (controller.signal.aborted)
+        throw new Error(
+          'The request timed out. Your progress is kept on this device. Retry to continue.',
+        );
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      throw new Error(typeof b.error === 'string' ? b.error : 'The request could not be completed');
-    }
-    return r.json();
   }, []);
   const drain = useCallback(async () => {
     if (!verified.current) return;
@@ -122,7 +135,7 @@ export function useLibrary() {
               setStatus('Fetching covers');
               const entries = job.entries
                 .filter((e) => e.item.kind === 'bookmark' && e.coverStatus === 'pending')
-                .slice(0, 4);
+                .slice(0, IMPORT_COVER_BATCH_SIZE);
               const next = await request('/api/import-covers', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

@@ -1120,3 +1120,101 @@ it('saves ordinary edits between import batches without losing progress or rever
   expect(hook.result.current.data?.library.records[original.id].title).toBe('Edited during import');
   expect(hook.result.current.importJob?.saved).toBe(2);
 });
+
+it('stops a stalled import request and retries the same durable batch', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const previous = globalThis.fetch;
+  let stalled = true;
+  const attempted: Operation[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/operations') {
+        attempted.push(JSON.parse(String(init?.body)));
+        if (stalled)
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('Aborted', 'AbortError')),
+              { once: true },
+            );
+          });
+      }
+      return previous(url, init);
+    }),
+  );
+  const hook = await mounted();
+  vi.useFakeTimers();
+  try {
+    await act(async () => {
+      await hook.result.current.startImport(
+        'stalled.csv',
+        parseRaindropCsvWithCovers('url\nhttps://a.test'),
+      );
+    });
+    expect(attempted).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(hook.result.current.importJob?.error).toMatch(/timed out/i);
+    expect(hook.result.current.importJob?.saved).toBe(0);
+    expect(memory.get(scope)?.importJob?.saved).toBe(0);
+    stalled = false;
+    await act(async () => {
+      await hook.result.current.controlImport('resume');
+    });
+    expect(hook.result.current.importJob?.saved).toBe(1);
+    expect(attempted).toHaveLength(2);
+    expect(attempted[1]).toEqual(attempted[0]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('batches 20 covers and reschedules entries omitted by a slow batch without losing progress', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const previous = globalThis.fetch;
+  const calls: string[][] = [];
+  const completed: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/import-covers') {
+        const entries = JSON.parse(String(init?.body)).entries as {
+          recordId: string;
+        }[];
+        calls.push(entries.map((entry) => entry.recordId));
+        const processed = calls.length === 1 ? entries.slice(0, 4) : entries;
+        completed.push(...processed.map((entry) => entry.recordId));
+        return response({
+          ...structuredClone(snapshot),
+          coverOutcomes: processed.map((entry) => ({
+            recordId: entry.recordId,
+            status: 'unavailable',
+          })),
+        });
+      }
+      return previous(url, init);
+    }),
+  );
+  const hook = await mounted();
+  const entries = parseRaindropCsvWithCovers(
+    'url\n' +
+      Array.from({ length: 45 }, (_, i) => `https://example.test/${i}`).join(
+        '\n',
+      ),
+  );
+  await act(async () => {
+    await hook.result.current.startImport('batch.csv', entries);
+  });
+  await waitFor(() =>
+    expect(
+      hook.result.current.importJob?.entries.every(
+        (entry) => entry.coverStatus === 'unavailable',
+      ),
+    ).toBe(true),
+  );
+  expect(calls.map((batch) => batch.length)).toEqual([20, 20, 20, 1]);
+  expect(completed).toEqual(entries.map((entry) => entry.item.id));
+  expect(hook.result.current.importJob?.saved).toBe(45);
+});

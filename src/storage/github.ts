@@ -28,10 +28,7 @@ export class GitHubStore implements Store {
         const data = Buffer.from(value.content, 'base64');
         if (data.length > limit) throw new Error('GitHub blob exceeds size limit');
         if (gitBlobHash(data) !== sha) throw new Error('GitHub blob hash mismatch');
-        if (data.length <= 64 * 1024 * 1024) {
-          while(this.blobBytes + data.length > 64 * 1024 * 1024 && this.blobs.size) { const first = this.blobs.keys().next().value!; this.blobBytes -= this.blobs.get(first)!.length; this.blobs.delete(first); }
-          this.blobs.set(sha,data); this.blobBytes += data.length;
-        }
+        this.rememberBlob(sha, data);
         return data;
       })().finally(() => this.pendingBlobs.delete(sha));
       this.pendingBlobs.set(sha,pending);
@@ -39,6 +36,16 @@ export class GitHubStore implements Store {
     const data = await pending;
     if (data.length > limit) throw new Error('GitHub blob exceeds size limit');
     return data;
+  }
+  private rememberBlob(sha: string, data: Buffer) {
+    if (data.length > 64 * 1024 * 1024 || this.blobs.has(sha)) return;
+    while (this.blobBytes + data.length > 64 * 1024 * 1024 && this.blobs.size) {
+      const first = this.blobs.keys().next().value!;
+      this.blobBytes -= this.blobs.get(first)!.length;
+      this.blobs.delete(first);
+    }
+    this.blobs.set(sha, data);
+    this.blobBytes += data.length;
   }
   async readMediaByHash(hash: string): Promise<Buffer> {
     if (!/^[a-f0-9]{40}$/.test(hash)) throw new Error('Invalid image hash');
@@ -72,13 +79,16 @@ export class GitHubStore implements Store {
   private async api(route: string, method = 'GET', body?: unknown, maxBytes?: number): Promise<any> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}${route}`,
+        route === '/graphql'
+          ? 'https://api.github.com/graphql'
+          : `https://api.github.com/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}${route}`,
         {
           method,
           headers: {
             Authorization: `Bearer ${this.token}`,
             Accept: 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           },
           body: body === undefined ? undefined : JSON.stringify(body),
           cache: 'no-store',
@@ -203,38 +213,85 @@ export class GitHubStore implements Store {
   ): Promise<Snapshot> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const state = await this.load(true);
-      if (state.parsed.diagnostics.length) throw new Error(state.parsed.diagnostics.join('\n'));
+      if (state.parsed.diagnostics.length)
+        throw new Error(state.parsed.diagnostics.join('\n'));
       const next = await change(state);
       const entries: any[] = [];
-      const uploads = [...next];
+      const deleted = [
+        ...new Set([
+          ...state.files.keys(),
+          ...state.entries
+            .filter((e: any) => e.path.startsWith('.gitdrop/media/'))
+            .map((e: any) => e.path),
+          ...Object.values(state.parsed.paths)
+            .map((p) => p.replace(/\.json$/, '.webp'))
+            .filter((p) => state.entries.some((e: any) => e.path === p)),
+        ]),
+      ].filter((file) => !next.has(file));
+      const changed = [...next].filter(([file, data]) => {
+        if (state.files.get(file)?.equals(data)) return false;
+        const existing = state.entries.find((e: any) => e.path === file);
+        return (
+          existing?.sha !==
+          (parseMediaReference(data)?.sha ?? gitBlobHash(data))
+        );
+      });
+      try {
+        if (await this.commitFiles(state.head, changed, deleted))
+          return await this.read();
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        if (attempt < 3 && (status === undefined || status === 409)) continue;
+        throw error;
+      }
+      const uploads = changed;
       let cursor = 0;
-      await Promise.all(Array.from({ length: Math.min(4, uploads.length) }, async () => {
-        while (cursor < uploads.length) {
-          const [file, data] = uploads[cursor++];
-          if (state.files.get(file)?.equals(data)) continue;
-          const existing = state.entries.find((e: any) => e.path === file);
-          if (existing?.sha === gitBlobHash(data)) continue;
-          const reused = parseMediaReference(data);
-          if (reused && existing?.sha === reused.sha) continue;
-          const blob = reused
-            ? { sha: reused.sha }
-            : await this.api('/git/blobs', 'POST', {
-                content: data.toString('base64'),
-                encoding: 'base64',
+      let inlineBytes = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(4, uploads.length) }, async () => {
+          while (cursor < uploads.length) {
+            const [file, data] = uploads[cursor++];
+            if (state.files.get(file)?.equals(data)) continue;
+            const existing = state.entries.find((e: any) => e.path === file);
+            if (existing?.sha === gitBlobHash(data)) continue;
+            const reused = parseMediaReference(data);
+            if (reused && existing?.sha === reused.sha) continue;
+            const sha = gitBlobHash(data);
+            // Publish JSON in the tree request instead of uploading each record and
+            // derived shard separately. Bound the inline payload for large libraries.
+            if (
+              !reused &&
+              file.endsWith('.json') &&
+              inlineBytes + data.length <= 4_000_000
+            ) {
+              inlineBytes += data.length;
+              entries.push({
+                path: file,
+                mode: '100644',
+                type: 'blob',
+                content: data.toString('utf8'),
               });
-          entries.push({ path: file, mode: '100644', type: 'blob', sha: blob.sha });
-        }
-      }));
-      for (const file of new Set([
-        ...state.files.keys(),
-        ...state.entries
-          .filter((e: any) => e.path.startsWith('.gitdrop/media/'))
-          .map((e: any) => e.path),
-        ...Object.values(state.parsed.paths as Record<string, string>)
-          .map((p) => p.replace(/\.json$/, '.webp'))
-          .filter((p) => state.entries.some((e: any) => e.path === p)),
-      ]))
-        if (!next.has(file)) entries.push({ path: file, mode: '100644', type: 'blob', sha: null });
+              this.rememberBlob(sha, data);
+              continue;
+            }
+            const blob = reused
+              ? { sha: reused.sha }
+              : await this.api('/git/blobs', 'POST', {
+                  content: data.toString('base64'),
+                  encoding: 'base64',
+                });
+            if (!reused) this.rememberBlob(blob.sha, data);
+            entries.push({
+              path: file,
+              mode: '100644',
+              type: 'blob',
+              sha: blob.sha,
+            });
+          }
+        }),
+      );
+      for (const file of deleted)
+        entries.push({ path: file, mode: '100644', type: 'blob', sha: null });
       if (!entries.length)
         return {
           library: state.parsed.library,
@@ -242,24 +299,104 @@ export class GitHubStore implements Store {
           revision: state.head,
           status: 'Synced',
         };
-      const tree = await this.api('/git/trees', 'POST', { base_tree: state.tree, tree: entries });
+      const tree = await this.api('/git/trees', 'POST', {
+        base_tree: state.tree,
+        tree: entries,
+      });
       const commit = await this.api('/git/commits', 'POST', {
         message: 'Update bookmark library',
         tree: tree.sha,
         parents: [state.head],
       });
       try {
-        await this.api(`/git/refs/heads/${encodeURIComponent(this.branch)}`, 'PATCH', {
-          sha: commit.sha,
-          force: false,
-        });
+        await this.api(
+          `/git/refs/heads/${encodeURIComponent(this.branch)}`,
+          'PATCH',
+          {
+            sha: commit.sha,
+            force: false,
+          },
+        );
         return await this.read();
       } catch (error) {
         const status = (error as { status?: number }).status;
-        if (attempt === 3 || (status !== undefined && ![409, 422].includes(status))) throw error;
+        if (
+          attempt === 3 ||
+          (status !== undefined && ![409, 422].includes(status))
+        )
+          throw error;
       }
     }
     throw new Error('GitHub publication failed; retry pending changes');
+  }
+  /** Batch JSON and binary files in one atomic commit; oversized/reference-only changes use REST. */
+  private async commitFiles(
+    head: string,
+    changed: [string, Buffer][],
+    deleted: string[],
+  ) {
+    if (!changed.length && !deleted.length) return false;
+    if (changed.length + deleted.length > 1000) return false;
+    let bytes = 0;
+    for (const [file, data] of changed) {
+      if (parseMediaReference(data)) return false;
+      bytes += Math.ceil(data.length / 3) * 4 + Buffer.byteLength(file) + 64;
+      if (bytes > 8_000_000) return false;
+    }
+    const body = {
+      query: `mutation PublishFiles($input: CreateCommitOnBranchInput!) {
+        createCommitOnBranch(input: $input) { commit { oid } }
+      }`,
+      variables: {
+        input: {
+          branch: {
+            repositoryNameWithOwner: `${this.owner}/${this.repo}`,
+            branchName: this.branch,
+          },
+          expectedHeadOid: head,
+          message: { headline: 'Update bookmark library' },
+          fileChanges: {
+            additions: changed.map(([path, data]) => ({
+              path,
+              contents: data.toString('base64'),
+            })),
+            deletions: deleted.map((path) => ({ path })),
+          },
+        },
+      },
+    };
+    if (Buffer.byteLength(JSON.stringify(body)) > 8_000_000) return false;
+    for (const [, data] of changed) this.rememberBlob(gitBlobHash(data), data);
+    const result = await this.api('/graphql', 'POST', body);
+    if (result.errors?.length) {
+      if (
+        result.errors.some((e: { type?: string }) => e.type === 'RATE_LIMITED')
+      )
+        throw Object.assign(
+          new Error(
+            'GitHub rate limit reached; retry after the server limit resets.',
+          ),
+          { status: 429 },
+        );
+      // GraphQL reports stale HEADs as HTTP 200 errors. Rebase only when the branch actually moved.
+      if ((await this.currentRevision()) !== head)
+        throw Object.assign(
+          new Error('GitHub branch changed; retrying against the latest head.'),
+          { status: 409 },
+        );
+      throw Object.assign(
+        new Error(
+          'GitHub commit failed; verify repository permissions and branch rules.',
+        ),
+        { status: 400 },
+      );
+    }
+    if (!result.data?.createCommitOnBranch?.commit?.oid)
+      throw Object.assign(
+        new Error('GitHub did not confirm the commit. Retry to continue.'),
+        { status: 502 },
+      );
+    return true;
   }
   async mutate(operation: Operation) {
     return this.write(async (state) =>

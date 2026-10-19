@@ -3,7 +3,7 @@ import { GitHubStore } from '../src/storage/github';
 import { createLibrary, makeItem, applyOperation } from '../src/domain/operations';
 import { encodeFiles, gitBlobHash, decodeFiles } from '../src/storage/codec';
 afterEach(() => vi.unstubAllGlobals());
-it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
+it.each(['normal', 'race', 'lost-response', 'cover-batch', 'import-batch', 'large-import', 'thousand-import', 'delete', 'move-cover', 'graphql-error', 'graphql-rate-limit'])(
   'reads verified shards and publishes safely: %s',
   async (scenario) => {
     const library = createLibrary();
@@ -38,7 +38,30 @@ it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
         const route = new URL(input).pathname.replace('/repos/test/library', '');
         const body = init.body ? JSON.parse(init.body) : null;
         let result: any;
-        if (route === '/git/ref/heads/main') result = { object: { sha: head } };
+        if (route === '/graphql') {
+          expect(init.headers['Content-Type']).toBe('application/json');
+          if (scenario === 'graphql-error' || scenario === 'graphql-rate-limit')
+            return new Response(JSON.stringify({ errors: [{ type: scenario === 'graphql-error' ? 'FORBIDDEN' : 'RATE_LIMITED' }] }));
+          const change = body.variables.input;
+          expect(change.branch).toEqual({ repositoryNameWithOwner: 'test/library', branchName: 'main' });
+          updates.push({ force: false });
+          if (scenario === 'race' && updates.length === 1) {
+            const remoteLibrary = applyOperation(decodeFiles(files).library, {
+              id: 'remote-edit', actor: 'other', type: 'update', recordId: item.id,
+              patch: { note: 'Remote note' },
+            });
+            files = encodeFiles(remoteLibrary, files, decodeFiles(files).paths);
+            head = 'concurrent-head'; treeId = 'concurrent-tree'; refresh();
+          }
+          if (change.expectedHeadOid !== head)
+            return new Response(JSON.stringify({ errors: [{ type: 'UNPROCESSABLE', message: 'Expected head does not match' }] }));
+          for (const deletion of change.fileChanges.deletions) files.delete(deletion.path);
+          for (const addition of change.fileChanges.additions) files.set(addition.path, Buffer.from(addition.contents, 'base64'));
+          head = `head${++index}`; treeId = `tree${++index}`; refresh();
+          result = { data: { createCommitOnBranch: { commit: { oid: head } } } };
+          if (scenario === 'lost-response' && updates.length === 1)
+            throw new Error('Connection lost after publish');
+        } else if (route === '/git/ref/heads/main') result = { object: { sha: head } };
         else if (route.startsWith('/git/commits/') && init.method === 'GET')
           result = commits.get(route.split('/').pop()!);
         else if (route.startsWith('/git/trees/') && init.method === 'GET')
@@ -57,7 +80,12 @@ it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
           const entries = new Map(trees.get(body.base_tree)!.map((e) => [e.path, e]));
           for (const e of body.tree) {
             if (e.sha === null) entries.delete(e.path);
-            else entries.set(e.path, e);
+            else if (typeof e.content === 'string') {
+              const data = Buffer.from(e.content, 'utf8');
+              const sha = gitBlobHash(data);
+              blobs.set(sha, data);
+              entries.set(e.path, { path: e.path, mode: e.mode, type: e.type, sha });
+            } else entries.set(e.path, e);
           }
           treeId = `tree${++index}`;
           trees.set(treeId, [...entries.values()]);
@@ -95,6 +123,54 @@ it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
     );
     const store = new GitHubStore('test', 'library', 'secret');
     expect((await store.read()).library.records[item.id].title).toBe('Shared');
+    if (scenario === 'graphql-error' || scenario === 'graphql-rate-limit') {
+      await expect(store.mutate({ id: 'denied', actor: 'test', type: 'update', recordId: item.id, patch: { title: 'Never saved' } })).rejects.toThrow(scenario === 'graphql-error' ? 'permissions' : 'rate limit');
+      expect(decodeFiles(files).library.records[item.id].title).toBe('Shared');
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(1);
+      return;
+    }
+    if (scenario === 'delete') {
+      const result = await store.mutate({ id: 'delete', actor: 'test', type: 'delete', recordId: item.id });
+      expect(result.library.records[item.id]).toBeUndefined();
+      expect(decodeFiles(files).library.tombstones[item.id].record?.title).toBe(item.title);
+      const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/graphql'))!;
+      expect(JSON.parse(String(call[1]?.body)).variables.input.fileChanges.deletions.length).toBeGreaterThan(0);
+      return;
+    }
+    if (scenario === 'move-cover') {
+      const image = Buffer.from([0, 255, 3, 128, 2]);
+      await store.writeMedia(item.id, image);
+      const folder = makeItem('collection', { title: 'Destination' });
+      await store.mutate({ id: 'folder', actor: 'test', type: 'create', record: folder });
+      vi.mocked(fetch).mockClear();
+      const result = await store.mutate({ id: 'move', actor: 'test', type: 'update', recordId: item.id, patch: { parentId: folder.id } });
+      expect(result.library.records[item.id].parentId).toBe(folder.id);
+      expect(await store.readMedia(item.id)).toEqual(image);
+      expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url).endsWith('/git/trees') && init?.method === 'POST')).toBe(true);
+      return;
+    }
+    if (scenario === 'thousand-import') {
+      vi.mocked(fetch).mockClear();
+      const records = Array.from({ length: 1000 }, (_, i) => makeItem('bookmark', {
+        title: `Imported ${i}`, url: `https://example.test/${i}`,
+      }));
+      for (let i = 0; i < records.length; i += 100)
+        await store.mutate({ id: `import-${i}`, actor: 'csv-import', type: 'create', records: records.slice(i, i + 100) });
+      const saveCalls = vi.mocked(fetch).mock.calls.length;
+      for (let i = 0; i < records.length; i += 20) {
+        await store.read(); // Each cover endpoint starts with a fresh library snapshot.
+        await store.writeImportCovers(records.slice(i, i + 20).map(record => ({
+          id: record.id, url: record.variants![0].url, data: Buffer.from(`image-${record.id}`),
+        })));
+      }
+      const calls = vi.mocked(fetch).mock.calls;
+      expect(saveCalls).toBe(50);
+      expect(calls).toHaveLength(350);
+      expect(calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(60);
+      expect(calls.filter(([url, init]) => String(url).endsWith('/git/blobs') && init?.method === 'POST')).toHaveLength(0);
+      expect(Object.values(decodeFiles(files).library.records).filter(record => record.cover.imageHash)).toHaveLength(1000);
+      return;
+    }
     if (scenario === 'cover-batch') {
       const result = await store.writeImportCovers([item, second, manual].map(record => ({
         id: record.id, url: record.variants![0].url, data: Buffer.from(`image-${record.id}`),
@@ -103,10 +179,39 @@ it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
       expect(result.library.records[second.id].cover.imageHash).toBeTruthy();
       expect(result.library.records[manual.id].cover).toEqual(manual.cover);
       expect(updates).toHaveLength(1);
-      expect(maxUploading).toBeGreaterThan(1);
-      expect(maxUploading).toBeLessThanOrEqual(4);
+      expect(maxUploading).toBe(0);
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(1);
       const again = await store.writeImportCovers([{ id: item.id, url: item.variants![0].url, data: Buffer.from('replacement') }]);
       expect(again.library.records[item.id].cover.imageHash).toBe(result.library.records[item.id].cover.imageHash);
+      expect(updates).toHaveLength(1);
+      return;
+    }
+    if (scenario === 'import-batch' || scenario === 'large-import') {
+      vi.mocked(fetch).mockClear();
+      const records = Array.from({ length: 100 }, (_, i) => makeItem('collection', {
+        title: `Collection ${i} 收藏 📚`,
+        ...(scenario === 'large-import' && i < 10 ? { note: 'x'.repeat(200_000) } : {}),
+      }));
+      const result = await store.mutate({
+        id: 'import-0', actor: 'csv-import', type: 'create', records,
+      });
+      expect(Object.keys(result.library.records)).toHaveLength(101);
+      expect(decodeFiles(files).diagnostics).toEqual([]);
+      const decoded = decodeFiles(files);
+      for (const record of records)
+        expect(decoded.library.records[record.id]).toMatchObject({ title: record.title, note: record.note });
+      const calls = vi.mocked(fetch).mock.calls;
+      const uploads = calls.filter(([url, init]) => String(url).endsWith('/git/blobs') && init?.method === 'POST');
+      if (scenario === 'import-batch') {
+        expect(uploads).toHaveLength(0);
+        expect(calls.length).toBeLessThan(15);
+      } else {
+        expect(uploads.length).toBeGreaterThan(0);
+        const treeCall = calls.find(([url, init]) => String(url).endsWith('/git/trees') && init?.method === 'POST')!;
+        const tree = JSON.parse(String(treeCall[1]!.body)).tree;
+        const bytes = tree.reduce((sum: number, entry: any) => sum + Buffer.byteLength(entry.content ?? ''), 0);
+        expect(bytes).toBeLessThanOrEqual(4_000_000);
+      }
       expect(updates).toHaveLength(1);
       return;
     }
@@ -124,6 +229,7 @@ it.each(['normal', 'race', 'lost-response', 'cover-batch'])(
     expect(updates[0].force).toBe(false);
     expect(decodeFiles(files).library.records[item.id].title).toBe('Updated');
   },
+  30_000,
 );
 
 it('bounds rate-limit retries and obeys Retry-After', async () => {

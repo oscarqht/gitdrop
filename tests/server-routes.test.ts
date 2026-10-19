@@ -495,3 +495,82 @@ it('reports a failed cover, persists successful images, and does not download th
   expect((await res.json()).coverOutcomes[0].status).toBe('fetched');
   expect(vi.mocked(fetchMetadata).mock.calls.length).toBe(before);
 });
+
+it('accepts 20 cover entries, downloads at most four at once, and reads once when no images exist', async () => {
+  const { importCoversPost } = await import('../src/server/import-covers');
+  const { fetchMetadata } = await import('../src/server/metadata');
+  const initial = await shared.store.read();
+  const records = Array.from({ length: 20 }, (_, i) =>
+    makeItem('bookmark', {
+      id: `batch-${i}`,
+      title: `Batch ${i}`,
+      url: `https://example.test/${i}`,
+    }),
+  );
+  for (const record of records) initial.library.records[record.id] = record;
+  const read = vi.fn(async () => initial);
+  shared.store = { read };
+  let downloading = 0;
+  let maxDownloading = 0;
+  vi.mocked(fetchMetadata).mockImplementation(async () => {
+    downloading++;
+    maxDownloading = Math.max(maxDownloading, downloading);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    downloading--;
+    return { title: '', description: '', cover: undefined, warning: undefined };
+  });
+  try {
+    const res = await importCoversPost(
+      request('import-covers', {
+        entries: records.map((record) => ({ recordId: record.id })),
+      }),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.coverOutcomes).toHaveLength(20);
+    expect(
+      body.coverOutcomes.every(
+        (outcome: any) => outcome.status === 'unavailable',
+      ),
+    ).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(maxDownloading).toBe(4);
+  } finally {
+    vi.mocked(fetchMetadata).mockReset();
+  }
+});
+
+it('leaves unstarted covers pending when slow downloads exhaust the scheduling budget', async () => {
+  const { importCoversPost } = await import('../src/server/import-covers');
+  const { fetchMetadata } = await import('../src/server/metadata');
+  const initial = await shared.store.read();
+  const records = Array.from({ length: 20 }, (_, i) =>
+    makeItem('bookmark', {
+      id: `slow-${i}`,
+      title: `Slow ${i}`,
+      url: `https://example.test/${i}`,
+    }),
+  );
+  for (const record of records) initial.library.records[record.id] = record;
+  shared.store = { read: vi.fn(async () => initial) };
+  let now = Date.now();
+  const time = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  vi.mocked(fetchMetadata).mockImplementation(async () => {
+    now += 20_000;
+    return { title: '', description: '', cover: undefined, warning: undefined };
+  });
+  try {
+    const res = await importCoversPost(
+      request('import-covers', {
+        entries: records.map((record) => ({ recordId: record.id })),
+      }),
+    );
+    const body = await res.json();
+    expect(body.coverOutcomes.map((outcome: any) => outcome.recordId)).toEqual(
+      records.slice(0, 4).map((record) => record.id),
+    );
+  } finally {
+    time.mockRestore();
+    vi.mocked(fetchMetadata).mockReset();
+  }
+});
