@@ -1218,3 +1218,18 @@ it('batches 20 covers and reschedules entries omitted by a slow batch without lo
   expect(completed).toEqual(entries.map((entry) => entry.item.id));
   expect(hook.result.current.importJob?.saved).toBe(45);
 });
+
+it('ignores existing bookmarks on CSV upload without writes, cover fetches, or changing existing details', async () => {
+  const original = structuredClone(snapshot.library);
+  render(createElement(LibraryApp));
+  await screen.findByText('Original');
+  fireEvent.click(screen.getByRole('button', { name: /^Import$/i }));
+  const csv = 'url,title,folder\nhttps://example.com/,Replacement,Unused folder\nhttps://EXAMPLE.com:443,Repeated,Other unused folder';
+  fireEvent.change(screen.getByLabelText(/CSV file/i), { target: { files: [new File([csv], 'duplicates.csv', { type: 'text/csv' })] } });
+  fireEvent.click(screen.getByRole('button', { name: /Import bookmarks/i }));
+  await screen.findByText('Nothing new to import');
+  expect(screen.getByText('All bookmarks in this CSV already exist')).toBeTruthy();
+  expect(operations).toHaveLength(0);
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/import-covers')).toHaveLength(0);
+  expect(snapshot.library).toEqual(original);
+});

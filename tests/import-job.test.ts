@@ -44,3 +44,34 @@ it('bounds batches by UTF-8 payload size as well as record count', () => {
   expect(batch.records).toHaveLength(2);
   expect(new TextEncoder().encode(JSON.stringify(batch)).length).toBeLessThan(4_000_000);
 });
+
+it('skips existing bookmark URLs across collections and variants before creating folders', async () => {
+  const { makeItem } = await import('../src/domain/operations');
+  const existing = makeItem('bookmark', { title: 'Keep my title', url: 'https://example.com/' });
+  existing.note = 'Keep my note';
+  existing.variants!.push({ id: 'docs', name: 'Docs', url: 'https://example.com/docs', order: 'a1' });
+  const before = structuredClone(existing);
+  const entries = parseRaindropCsvWithCovers([
+    'url,title,folder',
+    'https://EXAMPLE.com:443,Changed title,Do not create',
+    'https://example.com/docs,Changed variant,Do not create either',
+    'https://example.com/new,New bookmark,New folder',
+    'https://example.com/new,Repeated row,Another unused folder',
+    'https://example.com/new?q=1,Distinct query,New folder',
+  ].join('\n'), { existingBookmarks: [existing] });
+  expect(entries.filter(entry => entry.item.kind === 'collection').map(entry => entry.item.title)).toEqual(['New folder']);
+  expect(entries.filter(entry => entry.item.kind === 'bookmark').map(entry => entry.item.title)).toEqual(['New bookmark', 'Distinct query']);
+  expect(existing).toEqual(before);
+});
+
+it('reuses collection paths and makes reimporting the same CSV a no-op', () => {
+  const csv = 'url,folder\nhttps://a.test,Parent / Child\nhttps://b.test,parent / child\nhttps://a.test,Parent / Child';
+  const first = parseRaindropCsvWithCovers(csv);
+  expect(first.filter(entry => entry.item.kind === 'collection')).toHaveLength(2);
+  expect(first.filter(entry => entry.item.kind === 'bookmark')).toHaveLength(2);
+  const existing = first.map(entry => entry.item);
+  expect(parseRaindropCsvWithCovers(csv, { existingCollections: existing, existingBookmarks: existing })).toEqual([]);
+  const added = parseRaindropCsvWithCovers('url,folder\nhttps://c.test,PARENT / CHILD', { existingCollections: existing, existingBookmarks: existing });
+  expect(added).toHaveLength(1);
+  expect(added[0].item.parentId).toBe(first[1].item.id);
+});
