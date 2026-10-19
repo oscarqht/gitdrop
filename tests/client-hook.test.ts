@@ -86,6 +86,10 @@ beforeEach(() => {
         }
         return response(structuredClone(snapshot));
       }
+      if (url === '/api/import-covers') {
+        const { entries } = JSON.parse(init!.body as string);
+        return response({ ...structuredClone(snapshot), coverOutcomes: entries.map((e: { recordId: string }) => ({ recordId: e.recordId, status: 'unavailable' })) });
+      }
       if (url === '/api/metadata') return response(structuredClone(snapshot));
       throw new Error(`Unexpected ${url}`);
     }),
@@ -736,21 +740,22 @@ it('opens import dialog when clicking Import and imports Raindrop CSV bookmarks 
   fireEvent.click(submitBtn);
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect(operations).toHaveLength(1);
-  expect(operations[0].type).toBe('create');
-  expect(operations[0].records).toHaveLength(3);
-  const createdCol = operations[0].records!.find((r) => r.kind === 'collection');
+  await waitFor(() => expect(operations).toHaveLength(2));
+  expect(operations.every(op => op.type === 'create')).toBe(true);
+  const importedRecords = operations.flatMap(op => op.records!);
+  expect(importedRecords).toHaveLength(3);
+  const createdCol = importedRecords.find((r) => r.kind === 'collection');
   expect(createdCol?.title).toBe('SomeOtherFolder');
 
-  const [firstImported, secondImported] = operations[0].records!.filter((r) => r.kind === 'bookmark');
+  const [firstImported, secondImported] = importedRecords.filter((r) => r.kind === 'bookmark');
   expect(firstImported.parentId).toBe('col-work');
   expect(secondImported.parentId).toBe(createdCol!.id);
 
   await waitFor(() => {
     const metadataCalls = vi
       .mocked(globalThis.fetch)
-      .mock.calls.filter(([url]) => url === '/api/metadata')
-      .map(([, init]) => JSON.parse(String(init?.body)));
+      .mock.calls.filter(([url]) => url === '/api/import-covers')
+      .flatMap(([, init]) => JSON.parse(String(init?.body)).entries);
     expect(metadataCalls).toHaveLength(2);
     expect(metadataCalls).toContainEqual({
       recordId: firstImported.id,
@@ -1020,3 +1025,98 @@ it('automatically follows the OS light/dark theme and provides no manual theme s
 
 
 
+
+it('keeps saved counts at zero until acknowledgement, pauses after the batch, and resumes across remount', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const previous = globalThis.fetch;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/operations' && operations.length === 0) {
+      await gate;
+    }
+    return previous(url, init);
+  }));
+  const hook = await mounted();
+  const entries = parseRaindropCsvWithCovers('url,folder\nhttps://a.test,Parent\nhttps://b.test,Parent');
+  await act(async () => { await hook.result.current.startImport('large.csv', entries); });
+  expect(hook.result.current.importJob?.saved).toBe(0);
+  await act(async () => { await hook.result.current.controlImport('pause'); release(); });
+  await waitFor(() => expect(hook.result.current.importJob?.saved).toBe(1));
+  expect(operations).toHaveLength(1);
+  expect(hook.result.current.importJob?.paused).toBe(true);
+  hook.unmount();
+  const resumed = renderHook(() => useLibrary());
+  await waitFor(() => expect(resumed.result.current.importJob?.saved).toBe(1));
+  await waitFor(() => expect(resumed.result.current.disabled).toBe(false));
+  expect(resumed.result.current.importJob?.saved).toBe(1);
+  expect(resumed.result.current.importJob?.paused).toBe(true);
+  await act(async () => { await resumed.result.current.controlImport('resume'); });
+  await waitFor(() => expect(resumed.result.current.importJob?.entries.filter(e => e.coverStatus === 'unavailable')).toHaveLength(2));
+  expect(resumed.result.current.importJob?.saved).toBe(3);
+  expect(operations).toHaveLength(2);
+});
+
+it('retries an unacknowledged import batch with its original operation ID', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const hook = await mounted();
+  rejectOnce = true;
+  await act(async () => { await hook.result.current.startImport('lost.csv', parseRaindropCsvWithCovers('url\nhttps://a.test')); });
+  await waitFor(() => expect(hook.result.current.importJob?.error).toBeTruthy());
+  expect(hook.result.current.importJob?.saved).toBe(0);
+  await act(async () => { await hook.result.current.controlImport('resume'); });
+  await waitFor(() => expect(hook.result.current.importJob?.saved).toBe(1));
+  expect(operations).toHaveLength(2);
+  expect(operations[1].id).toBe(operations[0].id);
+  expect(Object.values(snapshot.library.records).filter(r => r.variants?.[0]?.url === 'https://a.test/')).toHaveLength(1);
+});
+
+it('resumes unfinished covers automatically and retries only failed covers', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const { createImportJob } = await import('../src/client/import-job');
+  const entries = parseRaindropCsvWithCovers('url\nhttps://a.test\nhttps://b.test');
+  const job = createImportJob('covers.csv', entries);
+  job.saved = entries.length;
+  for (const entry of entries) snapshot.library.records[entry.item.id] = entry.item;
+  memory.set(scope, { snapshot, pending: [], importJob: job });
+  const previous = globalThis.fetch;
+  let first = true;
+  const calls: string[][] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/import-covers') {
+      const body = JSON.parse(init!.body as string);
+      calls.push(body.entries.map((e: any) => e.recordId));
+      const coverOutcomes = body.entries.map((e: any, i: number) => ({ recordId: e.recordId, status: first && i === 0 ? 'failed' : 'fetched' }));
+      first = false;
+      return response({ ...structuredClone(snapshot), coverOutcomes });
+    }
+    return previous(url, init);
+  }));
+  const hook = await mounted();
+  await waitFor(() => expect(hook.result.current.importJob?.entries.map(e => e.coverStatus)).toEqual(['failed', 'fetched']));
+  await act(async () => { await hook.result.current.controlImport('retry'); });
+  await waitFor(() => expect(hook.result.current.importJob?.entries.every(e => e.coverStatus === 'fetched')).toBe(true));
+  expect(calls).toEqual([[entries[0].item.id, entries[1].item.id], [entries[0].item.id]]);
+});
+
+it('saves ordinary edits between import batches without losing progress or reverting the edit', async () => {
+  const { parseRaindropCsvWithCovers } = await import('../src/domain/csv');
+  const previous = globalThis.fetch;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/api/operations' && operations.length === 0) await gate;
+    return previous(url, init);
+  }));
+  const hook = await mounted();
+  const original = Object.values(snapshot.library.records)[0];
+  await act(async () => { await hook.result.current.startImport('edit.csv', parseRaindropCsvWithCovers('url,folder\nhttps://a.test,Folder')); });
+  await act(async () => {
+    await hook.result.current.mutate({ type: 'update', recordId: original.id, base: original, patch: { title: 'Edited during import' } });
+    release();
+  });
+  await waitFor(() => expect(hook.result.current.importJob?.entries[1].coverStatus).toBe('unavailable'));
+  expect(operations.map(op => op.type)).toEqual(['create', 'update', 'create']);
+  expect(hook.result.current.data?.library.records[original.id].title).toBe('Edited during import');
+  expect(hook.result.current.importJob?.saved).toBe(2);
+});

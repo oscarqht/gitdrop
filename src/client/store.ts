@@ -1,5 +1,6 @@
 'use client';
 import { get, set, del } from 'idb-keyval';
+import type { ImportJob } from './import-job';
 import type { Library, Operation } from '../domain/types';
 import { applyOperation, deletionBaseRecords } from '../domain/operations';
 export type Snapshot = {
@@ -10,7 +11,7 @@ export type Snapshot = {
   syncStatus?: 'idle' | 'syncing' | 'synced' | 'error';
   syncError?: string;
 };
-export type Cache = { snapshot: Snapshot; pending: Operation[] };
+export type Cache = { snapshot: Snapshot; pending: Operation[]; importJob?: ImportJob };
 export function replay(snapshot: Snapshot, pending: Operation[]): Snapshot {
   let library = snapshot.library;
   for (const op of pending) {
@@ -45,7 +46,7 @@ export function confirmedStatus(snapshot?: Snapshot) {
 }
 
 export function acknowledge(cache: Cache, snapshot: Snapshot, operationId: string): Cache {
-  return { snapshot, pending: cache.pending.filter((op) => op.id !== operationId) };
+  return { ...cache, snapshot, pending: cache.pending.filter((op) => op.id !== operationId) };
 }
 
 /** Capture deletion intent at authoring time, never from a later refreshed snapshot. */

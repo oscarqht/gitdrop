@@ -1,6 +1,14 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyOperation } from '../domain/operations';
+import {
+  createImportJob,
+  nextRecordBatch,
+  importComplete,
+  retryCovers,
+  type ImportJob,
+} from './import-job';
+import type { RaindropImportEntry } from '../domain/csv';
 import type { Operation } from '../domain/types';
 import {
   archivePending,
@@ -29,6 +37,7 @@ function getClientCredentialsHeaders() {
 
 export function useLibrary() {
   const [data, setData] = useState<Snapshot>();
+  const [importJob, setImportJob] = useState<ImportJob>();
   const [mode, setMode] = useState<'local' | 'github'>('local');
   const [status, setStatus] = useState('Loading');
   const [error, setError] = useState('');
@@ -39,13 +48,20 @@ export function useLibrary() {
   const scope = useRef('');
   const busy = useRef<Promise<void> | null>(null);
   const active = useRef(true);
-  const publish = useCallback(async () => {
+  const actionsWaiting = useRef(0);
+  const actionQueue = useRef<Promise<void>>(Promise.resolve());
+  const publish = useCallback(async (requireDurable = false) => {
     if (!state.current) return;
     setData(replay(state.current.snapshot, state.current.pending));
+    setImportJob(state.current.importJob ? structuredClone(state.current.importJob) : undefined);
     try {
       await writeCache(scope.current, state.current);
     } catch {
       setError('Browser storage is unavailable. Keep this tab open until pending edits are saved.');
+      if (requireDurable)
+        throw new Error(
+          'Could not save import progress on this device. Free browser storage and retry.',
+        );
     }
   }, []);
   const request = useCallback(async (url: string, init?: RequestInit) => {
@@ -78,9 +94,58 @@ export function useLibrary() {
     if (!verified.current) return;
     if (busy.current) return busy.current;
     if (!state.current || !canReachServer(state.current.snapshot.mode, navigator.onLine)) return;
-    const work = (async () => {
+    const work = Promise.resolve().then(async () => {
       try {
-        while (state.current?.pending.length) {
+        while (
+          active.current &&
+          state.current &&
+          verified.current &&
+          canReachServer(state.current.snapshot.mode, navigator.onLine)
+        ) {
+          if (!state.current.pending.length) {
+            const job = state.current.importJob;
+            if (actionsWaiting.current || !job || job.paused || job.error || importComplete(job))
+              break;
+            // The complete plan is persisted before any request. Stable IDs make lost responses safe to retry.
+            await publish(true);
+            const batch = nextRecordBatch(job);
+            if (batch) {
+              setStatus('Saving import');
+              const next = await request('/api/operations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(batch),
+              });
+              job.saved += batch.records!.length;
+              state.current = { ...state.current, snapshot: next };
+            } else {
+              setStatus('Fetching covers');
+              const entries = job.entries
+                .filter((e) => e.item.kind === 'bookmark' && e.coverStatus === 'pending')
+                .slice(0, 4);
+              const next = await request('/api/import-covers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  entries: entries.map((e) => ({
+                    recordId: e.item.id,
+                    ...(e.coverUrl ? { coverUrl: e.coverUrl } : {}),
+                  })),
+                }),
+              });
+              for (const outcome of next.coverOutcomes) {
+                const entry = entries.find((e) => e.item.id === outcome.recordId);
+                if (entry) {
+                  entry.coverStatus = outcome.status;
+                  entry.coverError = outcome.error;
+                }
+              }
+              const { coverOutcomes: _, ...snapshot } = next;
+              state.current = { ...state.current, snapshot };
+            }
+            await publish(true);
+            continue;
+          }
           setStatus('Pending');
           const op = state.current.pending[0];
           const next = await request('/api/operations', {
@@ -94,10 +159,14 @@ export function useLibrary() {
         setStatus(confirmedStatus(state.current?.snapshot));
         setError('');
       } catch (e) {
+        if (state.current?.importJob && !importComplete(state.current.importJob)) {
+          state.current.importJob.error = networkMessage(e);
+          await publish();
+        }
         setStatus('Failed');
         setError(networkMessage(e));
       }
-    })();
+    });
     busy.current = work;
     try {
       await work;
@@ -121,7 +190,11 @@ export function useLibrary() {
       }
       if (pendingBefore !== state.current?.pending) return;
       if (!next.unchanged)
-        state.current = { snapshot: next, pending: state.current?.pending || [] };
+        state.current = {
+          ...state.current,
+          snapshot: next,
+          pending: state.current?.pending || [],
+        };
       if (!state.current) return;
       await publish();
       setStatus(state.current.pending.length ? 'Pending' : confirmedStatus(state.current.snapshot));
@@ -191,7 +264,9 @@ export function useLibrary() {
         }
         if (session.mode === 'github' && session.configured === false) {
           setStatus('Connect repository');
-          setError('Please configure your GitHub repository and personal access token in Settings.');
+          setError(
+            'Please configure your GitHub repository and personal access token in Settings.',
+          );
           return;
         }
         await refresh();
@@ -257,18 +332,38 @@ export function useLibrary() {
   };
   const action = async (url: string, body?: BodyInit) => {
     if (!verified.current) return;
+    actionsWaiting.current++;
+    const previous = actionQueue.current;
+    let release!: () => void;
+    actionQueue.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     try {
-      setStatus('Pending');
+      await previous;
+      // Finish the current batch; normal edits and actions get priority over the next import batch.
       await drain();
       if (state.current?.pending.length)
         throw new Error('Resolve pending changes before continuing');
-      const next = await request(url, {
-        method: 'POST',
-        body,
-        headers: typeof body === 'string' ? { 'Content-Type': 'application/json' } : undefined,
+      setStatus('Pending');
+      const work = Promise.resolve().then(async () => {
+        const next = await request(url, {
+          method: 'POST',
+          body,
+          headers: typeof body === 'string' ? { 'Content-Type': 'application/json' } : undefined,
+        });
+        state.current = {
+          ...state.current,
+          snapshot: next,
+          pending: state.current?.pending || [],
+        };
+        await publish();
       });
-      state.current = { snapshot: next, pending: state.current?.pending || [] };
-      await publish();
+      busy.current = work;
+      try {
+        await work;
+      } finally {
+        busy.current = null;
+      }
       setStatus(confirmedStatus(state.current?.snapshot));
       setError('');
       return true;
@@ -276,6 +371,10 @@ export function useLibrary() {
       setError(networkMessage(e));
       setStatus('Failed');
       return false;
+    } finally {
+      actionsWaiting.current--;
+      release();
+      void drain();
     }
   };
   const recoverPending = async () => {
@@ -290,21 +389,58 @@ export function useLibrary() {
       const backup = structuredClone(state.current);
       await archivePending(scope.current, backup);
       const url = URL.createObjectURL(
-        new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }),
+        new Blob([JSON.stringify(backup, null, 2)], {
+          type: 'application/json',
+        }),
       );
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = 'gitdrop-pending-recovery.json';
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      state.current = { snapshot: backup.snapshot, pending: [] };
+      state.current = { ...backup, snapshot: backup.snapshot, pending: [] };
       await publish();
       await refresh();
     } catch (e) {
       setError(networkMessage(e));
     }
   };
+  const startImport = async (name: string, entries: RaindropImportEntry[]) => {
+    if (!verified.current || !state.current)
+      throw new Error('Connect to verify this library before importing.');
+    if (state.current.importJob && !importComplete(state.current.importJob))
+      throw new Error('Finish the current import before starting another.');
+    const previous = state.current.importJob;
+    state.current.importJob = createImportJob(name, entries);
+    try {
+      await publish(true);
+    } catch (error) {
+      state.current.importJob = previous;
+      await publish();
+      throw error;
+    }
+    void drain();
+  };
+  const controlImport = async (command: 'pause' | 'resume' | 'retry' | 'dismiss') => {
+    const job = state.current?.importJob;
+    if (!job || !state.current) return;
+    if (command === 'dismiss') {
+      if (!importComplete(job)) return;
+      delete state.current.importJob;
+    } else if (command === 'pause') job.paused = true;
+    else {
+      job.error = undefined;
+      job.paused = false;
+      if (command === 'retry') retryCovers(job);
+    }
+    await publish(true);
+    if (command === 'resume' || command === 'retry') void drain();
+  };
   const logout = async () => {
+    if (state.current?.importJob && !importComplete(state.current.importJob)) {
+      setError('Finish the import before signing out. You can pause it and return later.');
+      return;
+    }
     if (state.current?.pending.length) {
       setError('Sync pending edits before signing out.');
       return;
@@ -321,6 +457,9 @@ export function useLibrary() {
   };
   return {
     data,
+    importJob,
+    startImport,
+    controlImport,
     mode: data?.mode ?? mode,
     status,
     error,

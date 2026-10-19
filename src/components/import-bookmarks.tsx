@@ -1,6 +1,12 @@
 'use client';
 import { Upload, X, ArrowUpRight } from 'lucide-react';
-import { useEffect, type Dispatch, type SetStateAction, type FormEvent } from 'react';
+import {
+  useEffect,
+  type Dispatch,
+  type SetStateAction,
+  type ReactNode,
+  type FormEvent,
+} from 'react';
 
 type Props = {
   setImportOpen: Dispatch<SetStateAction<boolean>>;
@@ -10,6 +16,7 @@ type Props = {
   collectionTitle?: string;
   importing: boolean;
   disabled: boolean;
+  progress?: ReactNode;
 };
 
 export function ImportBookmarks({
@@ -20,6 +27,7 @@ export function ImportBookmarks({
   collectionTitle,
   importing,
   disabled,
+  progress,
 }: Props) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -57,23 +65,30 @@ export function ImportBookmarks({
           <Upload size={25} />
         </div>
         <h2 id="import-bookmarks-title">Import bookmarks</h2>
-        <p>Choose a local Raindrop CSV file to import. Collections structure will be preserved and created if needed.</p>
-        <label>
-          CSV file
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            disabled={importing}
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-        </label>
-        <div className="modal-footer">
-          <span>Importing to {collectionTitle || 'Inbox'}</span>
-          <button className="primary" disabled={!file || importing || disabled}>
-            {importing ? 'Importing…' : 'Import bookmarks'}
-            <ArrowUpRight size={16} />
-          </button>
-        </div>
+        {progress || (
+          <>
+            <p>
+              Choose a local Raindrop CSV file to import. Collections structure will be preserved
+              and created if needed.
+            </p>
+            <label>
+              CSV file
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                disabled={importing}
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            </label>
+            <div className="modal-footer">
+              <span>Importing to {collectionTitle || 'Inbox'}</span>
+              <button className="primary" disabled={!file || importing || disabled}>
+                {importing ? 'Importing…' : 'Import bookmarks'}
+                <ArrowUpRight size={16} />
+              </button>
+            </div>
+          </>
+        )}
       </form>
     </div>
   );
