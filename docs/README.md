@@ -15,7 +15,7 @@ The launcher opens http://127.0.0.1:3000. Alternatively use `npm run dev` and op
 
 For a production local server, run `npm run build` followed by `npm start`. Keep the terminal process running for background synchronization. Closing the browser tab is fine; exiting the server or sleeping the device pauses sync.
 
-Do not set a custom `NODE_ENV`: Next's dev/build/start commands select the correct environment themselves.
+The dev and launch scripts explicitly use `NODE_ENV=development` and discard inherited `__NEXT_PRIVATE_STANDALONE_CONFIG`, so desktop hosts such as Trident cannot supply their own Next.js configuration. For build/start, let Next.js select its environment; do not set a custom `NODE_ENV`.
 
 ## Connect your private repository
 
