@@ -8,4 +8,4 @@ The browser persists a confirmed snapshot and pending operations in IndexedDB un
 
 A service worker caches the app shell and static assets, but never API responses. Offline browsing needs a prior successful online load. Signing out clears scoped IndexedDB and shell caches, and refuses while edits remain pending. Image covers are fetched on demand and are not guaranteed available offline.
 
-Validation: `npm test -- tests/client.test.ts` checks scoped IndexedDB persistence, non-destructive pending replay, shared titles with Default variants, and accurate local-versus-remote status. Native browser and touch interaction verification should additionally exercise the rendered app.
+Validation: `pnpm test tests/client.test.ts` checks scoped IndexedDB persistence, non-destructive pending replay, shared titles with Default variants, and accurate local-versus-remote status. Native browser and touch interaction verification should additionally exercise the rendered app.

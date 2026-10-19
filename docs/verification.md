@@ -1,15 +1,24 @@
 # Verification
 
-Verified on this Mac using Node.js 24.21.0. Tests use temporary repositories and do not publish to a real GitHub account.
+The original baseline below was verified on this Mac using Node.js 24.21.0. Commands are shown with their pnpm equivalents. Tests use temporary repositories and do not publish to a real GitHub account.
 
-## Automated checks
+## pnpm migration verification
 
-- `npm run build`: production build passes, including Next.js TypeScript validation.
-- `npm run test:coverage`: **106 tests pass across 12 files**.
+Verified with pnpm 12.14.0 and Node.js 22.22.2:
+
+- Imported the npm lockfile and compared package names and versions: all 339 application package versions were preserved.
+- `pnpm install --frozen-lockfile --prod=false`, `pnpm run typecheck`, and `pnpm run build` pass.
+- All 149 tests across 13 files pass. `pnpm run test:coverage` reports 87.51% overall line coverage but exits with a failure because `src/server/auth.ts` has 96.55% line coverage against its 100% threshold.
+- An isolated checkout of the original commit, installed using `npm ci`, reproduces the identical test counts, coverage figures, and threshold failure. This coverage gap predates the migration; the threshold is unchanged.
+
+## Original automated checks
+
+- `pnpm run build`: production build passes, including Next.js TypeScript validation.
+- `pnpm run test:coverage`: **106 tests pass across 12 files**.
 - Instrumented domain/storage/server/client logic: **86.63% line coverage**, 83.01% statement coverage. React components are verified through browser smoke checks rather than included in these coverage figures.
 - Authentication and public-network fetch guards each have **100% line coverage**. This measures executed lines, not a guarantee of complete security.
 - Coverage enforces at least 80% overall lines and 100% lines for those two guard modules.
-- `npm audit --omit=dev`: zero reported vulnerabilities.
+- `pnpm audit --prod`: zero reported vulnerabilities.
 - `git diff --check`: passes.
 
 Regression coverage includes independent real Git checkouts against a temporary bare remote, concurrent field and image changes, stale subtree deletion, manual filesystem edits/deletion, missing control files, symlink rejection, durable purge/recovery markers, named variant merges, metadata provenance, archive cancellation, GitHub publication races, lost responses, rate limits, cache scope, and persisted browser queue replay.
@@ -33,7 +42,7 @@ The smoke checks caught and fixed a Next.js localhost/127.0.0.1 origin normaliza
 
 ## Scale evidence
 
-`npm run benchmark:storage` creates a disposable physical library, measures it, and removes it afterward.
+`pnpm run benchmark:storage` creates a disposable physical library, measures it, and removes it afterward.
 
 Measured 10,000 bookmarks with 10,000 20-KiB cover fixtures (195 MiB of covers; 20,260 files):
 

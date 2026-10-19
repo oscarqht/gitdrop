@@ -4,16 +4,16 @@ A personal bookmark library stored as readable JSON files and collection folders
 
 ## Run locally
 
-Requires Node.js 22+ (Node 24 recommended) and Git. Dependencies are locked in package-lock.json.
+Requires Node.js 22.22.2 or a newer compatible release, pnpm 12.14.0, and Git. The `.nvmrc` pins Node.js 22.22.2 for development (`nvm install && nvm use`). Install pnpm with `npm install --global pnpm@12.14.0` if needed; `package.json` pins the package-manager version. Dependencies are locked in `pnpm-lock.yaml`. The `pnpm-workspace.yaml` allows install scripts only for the existing `esbuild` and `fsevents` dependencies.
 
 ```sh
-npm ci --include=dev
-npm run launch
+pnpm install --frozen-lockfile --prod=false
+pnpm run launch
 ```
 
-The launcher opens http://127.0.0.1:3000. Alternatively use `npm run dev` and open that address yourself. The first library request initializes an Inbox in `~/.gitdrop/library`. Set `GITDROP_DATA_DIR` to an absolute path to use another directory. Keep this data directory separate from the application's source checkout.
+The launcher opens http://127.0.0.1:3000. Alternatively use `pnpm run dev` and open that address yourself. The first library request initializes an Inbox in `~/.gitdrop/library`. Set `GITDROP_DATA_DIR` to an absolute path to use another directory. Keep this data directory separate from the application's source checkout.
 
-For a production local server, run `npm run build` followed by `npm start`. Keep the terminal process running for background synchronization. Closing the browser tab is fine; exiting the server or sleeping the device pauses sync.
+For a production local server, run `pnpm run build` followed by `pnpm start`. Keep the terminal process running for background synchronization. Closing the browser tab is fine; exiting the server or sleeping the device pauses sync.
 
 The dev and launch scripts explicitly use `NODE_ENV=development` and discard inherited `__NEXT_PRIVATE_STANDALONE_CONFIG`, so desktop hosts such as Trident cannot supply their own Next.js configuration. For build/start, let Next.js select its environment; do not set a custom `NODE_ENV`.
 
@@ -30,19 +30,19 @@ The configured branch defaults to `main`; use `GITDROP_BRANCH` consistently on a
 The CLI remains available for manual setup:
 
 ```sh
-npm run library -- init
-npm run library -- sync
+pnpm run library init
+pnpm run library sync
 git -C "$HOME/.gitdrop/library" remote add origin git@github.com:YOUR_ACCOUNT/YOUR_DATA_REPO.git
-npm run library -- sync
+pnpm run library sync
 # Alternatively clone on another device and launch with GITDROP_DATA_DIR set to the destination:
-npm run library -- clone git@github.com:YOUR_ACCOUNT/YOUR_DATA_REPO.git /absolute/path/to/library
+pnpm run library clone git@github.com:YOUR_ACCOUNT/YOUR_DATA_REPO.git /absolute/path/to/library
 ```
 
 The server starts an automatic sync worker after the first library request, then syncs every 60 seconds. Local saves are immediate; commits and publication are batched at sync time. `Sync now` also runs the same serialized pipeline. Without an origin, the library stays usable and the status remains local. External valid file edits are detected on reads and sync; browser views refresh periodically and on focus.
 
 ## Hosted deployment
 
-Deploy this Next.js application to Vercel with a Node.js 22+ runtime.
+Deploy this Next.js application to Vercel with a compatible Node.js 22 runtime (22.22.2 or newer). Use `pnpm install --frozen-lockfile --prod=false` as the install command and `pnpm run build` as the build command.
 
 ### Minimal setup (Personal Access Token)
 
@@ -101,10 +101,10 @@ See [domain details](domain.md), [storage details](storage.md), and [UI details]
 ## Validation
 
 ```sh
-npm test
-npm run test:coverage
-npm run typecheck
-npm run build
+pnpm test
+pnpm run test:coverage
+pnpm run typecheck
+pnpm run build
 ```
 
 Tests use temporary data repositories and a local bare remote; they never push to your GitHub account. Hosted transport tests use a simulated GitHub API. See [verification](verification.md) for measured evidence and remaining platform checks.
