@@ -55,6 +55,8 @@ On Vercel, set these environment variables:
 | `GITDROP_MODE` | `github` | Enables hosted GitHub storage mode |
 | `GITDROP_APP_URL` | `https://your-project.vercel.app` | (Optional) Your production HTTPS URL |
 
+Without `GITDROP_APP_URL`, PAT mode uses the incoming HTTPS origin (or HTTP on loopback for local development). Mutating requests must still come from that same origin.
+
 When opening the app, users will see the "Connect repository" button / prompt, where they enter their GitHub repository (`owner/repo`) and GitHub PAT (with `repo` Contents read/write permissions).
 
 ### Optional: GitHub OAuth Sign-In Gate
@@ -65,6 +67,7 @@ If you prefer to gate access behind GitHub OAuth, configure these additional env
 | --- | --- |
 | `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret |
+| `GITDROP_APP_URL` | Your production HTTPS URL (required for OAuth callback URLs) |
 | `GITDROP_SESSION_SECRET` | Random secret of at least 32 characters |
 | `GITDROP_GITHUB_USER` | (Optional) Restrict sign-in to a specific GitHub username. Leave unset to allow any GitHub user. |
 | `GITDROP_BRANCH` | (Optional) `main`, or the shared data branch |

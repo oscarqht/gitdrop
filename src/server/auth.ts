@@ -53,7 +53,22 @@ export function cookie(request: Request, name: string) {
 export function appOrigin(request: Request) {
   if (hosted()) {
     const configured = process.env.GITDROP_APP_URL;
-    if (!configured) throw new HttpError(503, 'Configure GITDROP_APP_URL.');
+    if (!configured) {
+      if (process.env.GITHUB_CLIENT_ID)
+        throw new HttpError(503, 'Configure GITDROP_APP_URL.');
+      // PAT mode can run on loopback or a deployment's incoming HTTPS origin.
+      // OAuth still requires a fixed, configured callback origin.
+      const requestUrl = new URL(request.url);
+      const host = request.headers.get('host') || requestUrl.host;
+      const protocol = request.headers.get('x-forwarded-proto') || requestUrl.protocol.slice(0, -1);
+      const url = new URL(`${protocol}://${host}`);
+      if (url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+        throw new HttpError(400, 'Invalid request origin.');
+      const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+      if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:'))
+        throw new HttpError(503, 'Hosted origin must use HTTPS.');
+      return url.origin;
+    }
     const configuredUrl = new URL(configured);
     if (configuredUrl.protocol !== 'https:')
       throw new HttpError(503, 'Hosted GITDROP_APP_URL must use HTTPS.');

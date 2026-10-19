@@ -99,6 +99,29 @@ it('rejects malformed signed payload and authority-shaped Host headers', () => {
   for (const host of ['user@localhost:3000', 'localhost:3000/path'])
     expect(() => appOrigin(request('http://localhost:3000', { host }))).toThrow('loopback');
 });
+describe('hosted PAT origin without an app URL', () => {
+  beforeEach(() => {
+    vi.stubEnv('GITDROP_MODE', 'github');
+    vi.stubEnv('GITDROP_APP_URL', '');
+    vi.stubEnv('GITHUB_CLIENT_ID', '');
+  });
+  it.each([
+    ['http://localhost:3000', { host: '127.0.0.1:3000' }, 'http://127.0.0.1:3000'],
+    ['http://[::1]:3000', {}, 'http://[::1]:3000'],
+    ['https://gitdrop.example/api/repository', {}, 'https://gitdrop.example'],
+    ['http://localhost:3000', { host: 'gitdrop.example', 'x-forwarded-proto': 'https' }, 'https://gitdrop.example'],
+  ])('accepts same-origin requests at %s', (url, headers, origin) => {
+    expect(appOrigin(request(url, headers))).toBe(origin);
+    expect(() => requireAccess(request(url, { ...headers, origin }), true)).not.toThrow();
+    expect(() => requireAccess(request(url, { ...headers, origin: 'https://evil.test' }), true)).toThrow('Same-origin');
+    expect(() => requireAccess(request(url, { ...headers, origin, 'sec-fetch-site': 'cross-site' }), true)).toThrow('Same-origin');
+  });
+  it('rejects insecure remote origins and malformed authorities', () => {
+    expect(() => appOrigin(request('http://gitdrop.example'))).toThrow('HTTPS');
+    for (const host of ['user@gitdrop.example', 'gitdrop.example/path', 'gitdrop.example?query', 'gitdrop.example#hash'])
+      expect(() => appOrigin(request('https://gitdrop.example', { host }))).toThrow('Invalid');
+  });
+});
 describe('hosted session authentication', () => {
   beforeEach(() => {
     vi.stubEnv('GITDROP_MODE', 'github');
